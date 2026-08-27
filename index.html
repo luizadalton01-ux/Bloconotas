@@ -21,6 +21,8 @@
     --blue:#3D8BFD;
     --lime:#8BD450;
     --ok:#2FBF71;
+    --recipe:#9B6BE0;
+    --recipe-bg:#EFE6FB;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   html,body{margin:0;height:100%;}
@@ -61,6 +63,10 @@
   .key:active{background:var(--blue); color:#fff; box-shadow:none; transform:translateY(2px);}
   #lock-msg{font-size:13px; color:var(--coral); min-height:16px; font-weight:600;}
   #setup-note{font-size:12px; color:var(--ink-soft); max-width:280px; line-height:1.5;}
+  #lock-cancel{position:absolute; top:16px; left:16px;}
+  #forgot-pin-btn{margin-top:2px;}
+  #recovery-setup, #recovery-answer-wrap{width:100%; max-width:280px;}
+  #recovery-question-display{font-size:13px; color:var(--ink-soft); font-weight:700; line-height:1.4;}
 
   /* ---------- HEADER ---------- */
   header{
@@ -118,6 +124,8 @@
   .card.lembrete .badge{background:var(--coral-bg); color:var(--coral);}
   .card.senha{border-left-color:var(--amber);}
   .card.senha .badge{background:var(--amber-bg); color:var(--amber);}
+  .card.receita{border-left-color:var(--recipe);}
+  .card.receita .badge{background:var(--recipe-bg); color:var(--recipe);}
   .card-content{min-width:0; flex:1;}
   .card-title{font-family:'Fredoka',sans-serif; font-weight:600; font-size:16px; color:var(--ink); margin-bottom:2px;}
   .card-body{font-size:13px; color:var(--ink-soft); white-space:pre-wrap; max-height:36px; overflow:hidden;}
@@ -139,8 +147,16 @@
   .tab-btn .icon{font-size:19px;}
   .tab-btn[data-tab="rascunhos"].active{color:var(--turq);}
   .tab-btn[data-tab="lembretes"].active{color:var(--coral);}
+  .tab-btn[data-tab="receitas"].active{color:var(--recipe);}
   .tab-btn[data-tab="senhas"].active{color:var(--amber);}
   .tab-btn.active{transform:translateY(-2px);}
+
+  /* ---------- VERSÃO DO APP ---------- */
+  #version-tag{
+    position:absolute; right:14px; bottom:80px; z-index:2;
+    font-size:10px; color:var(--ink-soft); opacity:.55;
+    font-weight:600; pointer-events:none;
+  }
 
   /* ---------- FAB ---------- */
   #fab{
@@ -166,6 +182,8 @@
   input:focus, textarea:focus{border-color:var(--blue);}
   #editor-title-input{font-family:'Fredoka',sans-serif; font-size:20px; font-weight:600;}
   textarea{min-height:140px; resize:vertical; line-height:1.6;}
+  .field-grow{flex:1 1 auto; min-height:200px;}
+  #fields-rascunhos, #fields-lembretes, #fields-receitas{flex:1;}
   .pw-row{display:flex; align-items:center; gap:8px;}
   .pw-row input{flex:1;}
   .save-bar{margin-top:auto; padding-top:12px;}
@@ -185,13 +203,30 @@
 <body>
 <div id="app">
 
-  <!-- LOCK -->
-  <div id="lock" class="screen">
+  <!-- LOCK (protege apenas a aba Senhas) -->
+  <div id="lock" class="screen" style="display:none;">
+    <button class="link-btn" id="lock-cancel" onclick="cancelLock()">‹ Cancelar</button>
     <h1 id="lock-title">Caderno</h1>
     <div class="pin-dots" id="pin-dots"></div>
     <div id="lock-msg"></div>
     <div class="keypad" id="keypad"></div>
     <div id="setup-note"></div>
+
+    <div id="recovery-setup" style="display:none; flex-direction:column; gap:10px;">
+      <label class="field-label">Pergunta de recuperação</label>
+      <input id="recovery-question-input" type="text" placeholder="Ex: nome do meu primeiro pet">
+      <label class="field-label">Resposta secreta</label>
+      <input id="recovery-answer-input" type="text" placeholder="Resposta">
+      <button class="btn btn-primary" onclick="confirmRecoverySetup()">Continuar</button>
+    </div>
+
+    <div id="recovery-answer-wrap" style="display:none; flex-direction:column; gap:10px;">
+      <div id="recovery-question-display"></div>
+      <input id="recovery-answer-check" type="text" placeholder="Sua resposta">
+      <button class="btn btn-primary" onclick="checkRecoveryAnswer()">Verificar</button>
+    </div>
+
+    <button class="link-btn" id="forgot-pin-btn" onclick="startRecovery()" style="display:none;">Esqueci meu PIN</button>
   </div>
 
   <!-- MAIN -->
@@ -207,6 +242,7 @@
     <div id="search-wrap"><input id="search-input" type="text" placeholder="Buscar..." oninput="renderList()"></div>
     <div id="sort-label">Ordenar: <span id="sort-current">mais recentes</span></div>
     <div id="list"></div>
+    <div id="version-tag"></div>
     <button id="fab" onclick="openEditor(null)">+</button>
     <div id="tabbar">
       <button class="tab-btn active" data-tab="rascunhos" onclick="switchTab('rascunhos')">
@@ -214,6 +250,9 @@
       </button>
       <button class="tab-btn" data-tab="lembretes" onclick="switchTab('lembretes')">
         <span class="icon">🔔</span>Lembretes
+      </button>
+      <button class="tab-btn" data-tab="receitas" onclick="switchTab('receitas')">
+        <span class="icon">🍲</span>Receitas
       </button>
       <button class="tab-btn" data-tab="senhas" onclick="switchTab('senhas')">
         <span class="icon">🔑</span>Senhas
@@ -230,14 +269,20 @@
 
     <div id="fields-rascunhos" style="display:none; flex-direction:column; gap:12px;">
       <input id="rascunho-title" type="text" placeholder="Título">
-      <textarea id="rascunho-body" placeholder="Escreva aqui..."></textarea>
+      <textarea id="rascunho-body" class="field-grow" placeholder="Escreva aqui..."></textarea>
     </div>
 
     <div id="fields-lembretes" style="display:none; flex-direction:column; gap:12px;">
       <input id="lembrete-title" type="text" placeholder="Título do lembrete">
-      <textarea id="lembrete-body" placeholder="Detalhes (opcional)" style="min-height:100px;"></textarea>
+      <textarea id="lembrete-body" class="field-grow" placeholder="Detalhes (opcional)" style="min-height:120px;"></textarea>
       <label class="field-label">Data e hora</label>
       <input id="lembrete-when" type="datetime-local">
+    </div>
+
+    <div id="fields-receitas" style="display:none; flex-direction:column; gap:12px;">
+      <input id="receita-title" type="text" placeholder="Nome da receita">
+      <textarea id="receita-ingredientes" class="field-grow" placeholder="Ingredientes..." style="min-height:150px;"></textarea>
+      <textarea id="receita-preparo" class="field-grow" placeholder="Modo de preparo..." style="min-height:200px;"></textarea>
     </div>
 
     <div id="fields-senhas" style="display:none; flex-direction:column; gap:12px;">
@@ -270,12 +315,13 @@
         allow read, write: if true;
    ========================================================================= */
 const firebaseConfig = {
-  apiKey: "COLE_AQUI_SUA_API_KEY",
-  authDomain: "SEU_PROJETO.firebaseapp.com",
-  projectId: "SEU_PROJETO",
-  storageBucket: "SEU_PROJETO.appspot.com",
-  messagingSenderId: "000000000000",
-  appId: "1:000000000000:web:xxxxxxxxxxxxxxxxxx"
+  apiKey: "AIzaSyAp8t81f1VHOjqyt1PhFngfIbUHfUtZP64",
+  authDomain: "bloco-de-notas-2cfba.firebaseapp.com",
+  projectId: "bloco-de-notas-2cfba",
+  storageBucket: "bloco-de-notas-2cfba.firebasestorage.app",
+  messagingSenderId: "623385731054",
+  appId: "1:623385731054:web:522dfcda0cb92fbbbeb8ff",
+  measurementId: "G-S3V3VVJ971"
 };
 const NOTEBOOK_ID = "meu-caderno";
 
@@ -287,12 +333,20 @@ async function initFirebase() {
     const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
     const { getFirestore, doc, getDoc, setDoc } =
       await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
-    if (firebaseConfig.apiKey.startsWith("COLE_AQUI")) { firebaseReady = false; return; }
     const app = initializeApp(firebaseConfig);
     db = getFirestore(app);
     window.__fb = { doc, getDoc, setDoc };
     firebaseReady = true;
     setSyncStatus(true);
+
+    // Analytics é opcional: se o domínio não estiver autorizado no console
+    // do Firebase, isso falha silenciosamente sem afetar o restante do app.
+    try {
+      const { getAnalytics } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics.js");
+      getAnalytics(app);
+    } catch (eAnalytics) {
+      console.warn("Analytics não inicializado:", eAnalytics);
+    }
   } catch (e) {
     console.error("Firebase não conectado:", e);
     firebaseReady = false;
@@ -304,43 +358,56 @@ function setSyncStatus(on) {
   document.getElementById('sync-dot').classList.toggle('on', on);
 }
 
+/* =========================================================================
+   HISTÓRICO DE VERSÕES
+   -------------------------------------------------------------------------
+   v1.0.0 — versão original (rascunhos, lembretes, senhas; PIN geral de
+            entrada; armazenamento na nuvem via Firebase/Firestore).
+   v1.1.0 — adicionada aba "Receitas"; PIN passou a proteger somente a aba
+            "Senhas" (app abre direto, sem senha de entrada); adicionada
+            recuperação de PIN por pergunta secreta; campos de texto dos
+            editores (rascunho, lembrete, receita) aumentados para ocupar
+            a tela; configuração real do Firebase conectada.
+   ========================================================================= */
+const APP_VERSION = "1.1.0";
+
 /* =========================== ESTADO EM MEMÓRIA =========================== */
 let data = {
   pin: null,
+  recovery: null, // { question, answer }
   rascunhos: [],
   lembretes: [],
+  receitas: [],
   senhas: []
 };
 let pinBuffer = "";
-let mode = "checkPin";
+let mode = "checkPin"; // createPin | checkPin | createRecovery | recoverAnswer | resetPin
 let activeTab = "rascunhos";
 let currentEditId = null;
 let scheduledTimers = {};
 let searchOpen = false;
 let sortMode = "data"; // "data" | "titulo"
+let senhasUnlocked = false;
+let lockReturnTab = "rascunhos";
 
-const TAB_LABELS = { rascunhos: "Rascunhos", lembretes: "Lembretes", senhas: "Senhas" };
-const TAB_ICON = { rascunhos: "📝", lembretes: "🔔", senhas: "🔑" };
+const TAB_LABELS = { rascunhos: "Rascunhos", lembretes: "Lembretes", receitas: "Receitas", senhas: "Senhas" };
+const TAB_ICON = { rascunhos: "📝", lembretes: "🔔", receitas: "🍲", senhas: "🔑" };
 
 /* =========================== PERSISTÊNCIA =========================== */
 async function loadFromCloud() {
-  if (!firebaseReady) {
-    mode = data.pin ? "checkPin" : "createPin";
-    return renderLock();
-  }
+  if (!firebaseReady) return;
   const { doc, getDoc } = window.__fb;
   const ref = doc(db, "notebooks", NOTEBOOK_ID);
   const snap = await getDoc(ref);
   if (snap.exists()) {
     const d = snap.data();
     data.pin = d.pin || null;
+    data.recovery = d.recovery || null;
     data.rascunhos = d.rascunhos || [];
     data.lembretes = d.lembretes || [];
+    data.receitas = d.receitas || [];
     data.senhas = d.senhas || [];
   }
-  mode = data.pin ? "checkPin" : "createPin";
-  renderLock();
-  scheduleAllReminders();
 }
 
 async function saveToCloud() {
@@ -350,14 +417,37 @@ async function saveToCloud() {
   await setDoc(ref, data, { merge: true });
 }
 
-/* =========================== TELA DE PIN =========================== */
+/* =========================== TELA DE PIN (protege apenas "Senhas") =========================== */
+const PIN_MODES = ["createPin", "checkPin", "resetPin"];
+
 function renderLock() {
-  document.getElementById('lock-title').textContent = mode === "createPin" ? "Crie um PIN" : "Caderno ✨";
-  document.getElementById('setup-note').textContent = mode === "createPin"
-    ? "Defina um PIN de 4 dígitos para proteger o acesso ao seu caderno."
-    : "";
-  buildKeypad();
-  renderPinDots();
+  const showKeypad = PIN_MODES.includes(mode);
+  document.getElementById('keypad').style.display = showKeypad ? 'grid' : 'none';
+  document.getElementById('pin-dots').style.display = showKeypad ? 'flex' : 'none';
+  document.getElementById('recovery-setup').style.display = mode === 'createRecovery' ? 'flex' : 'none';
+  document.getElementById('recovery-answer-wrap').style.display = mode === 'recoverAnswer' ? 'flex' : 'none';
+  document.getElementById('forgot-pin-btn').style.display = (mode === 'checkPin' && data.recovery) ? 'block' : 'none';
+
+  const titles = {
+    createPin: "Crie um PIN",
+    checkPin: "Senhas 🔒",
+    createRecovery: "Recuperação",
+    recoverAnswer: "Recuperar PIN",
+    resetPin: "Novo PIN"
+  };
+  document.getElementById('lock-title').textContent = titles[mode] || "Caderno";
+
+  const notes = {
+    createPin: "Defina um PIN de 4 dígitos para proteger a aba Senhas.",
+    checkPin: "",
+    createRecovery: "Configure uma pergunta para recuperar seu PIN caso esqueça.",
+    recoverAnswer: "",
+    resetPin: "Digite um novo PIN de 4 dígitos."
+  };
+  document.getElementById('setup-note').textContent = notes[mode] || "";
+  document.getElementById('lock-msg').textContent = "";
+
+  if (showKeypad) { buildKeypad(); renderPinDots(); }
 }
 
 function buildKeypad() {
@@ -393,14 +483,20 @@ function handleKey(k) {
   renderPinDots();
   if (pinBuffer.length === 4) {
     if (mode === "createPin") {
+      // Guarda o PIN temporariamente; a etapa seguinte define a recuperação.
+      data.pinPending = pinBuffer;
+      pinBuffer = "";
+      mode = "createRecovery";
+      renderLock();
+    } else if (mode === "resetPin") {
       data.pin = pinBuffer;
       pinBuffer = "";
       saveToCloud();
-      unlock();
+      finishSenhasUnlock();
     } else {
       if (pinBuffer === data.pin) {
         pinBuffer = "";
-        unlock();
+        finishSenhasUnlock();
       } else {
         msg.textContent = "PIN incorreto";
         setTimeout(() => { pinBuffer = ""; renderPinDots(); }, 350);
@@ -409,15 +505,81 @@ function handleKey(k) {
   }
 }
 
-function unlock() {
+/* Abre a tela de PIN somente quando o usuário tenta acessar "Senhas" */
+function openSenhasLock() {
+  pinBuffer = "";
+  mode = data.pin ? "checkPin" : "createPin";
+  document.getElementById('main').style.display = 'none';
+  document.getElementById('lock').style.display = 'flex';
+  renderLock();
+}
+
+function cancelLock() {
+  pinBuffer = "";
+  document.getElementById('recovery-question-input').value = "";
+  document.getElementById('recovery-answer-input').value = "";
+  document.getElementById('recovery-answer-check').value = "";
   document.getElementById('lock').style.display = 'none';
   document.getElementById('main').style.display = 'flex';
-  requestNotificationPermission();
+}
+window.cancelLock = cancelLock;
+
+function confirmRecoverySetup() {
+  const q = document.getElementById('recovery-question-input').value.trim();
+  const a = document.getElementById('recovery-answer-input').value.trim();
+  if (!q || !a) { showToast("Preencha a pergunta e a resposta"); return; }
+  data.pin = data.pinPending;
+  delete data.pinPending;
+  data.recovery = { question: q, answer: a.toLowerCase() };
+  document.getElementById('recovery-question-input').value = "";
+  document.getElementById('recovery-answer-input').value = "";
+  saveToCloud();
+  finishSenhasUnlock();
+}
+window.confirmRecoverySetup = confirmRecoverySetup;
+
+function startRecovery() {
+  if (!data.recovery) { showToast("Nenhuma recuperação configurada"); return; }
+  mode = "recoverAnswer";
+  document.getElementById('recovery-question-display').textContent = data.recovery.question;
+  renderLock();
+}
+window.startRecovery = startRecovery;
+
+function checkRecoveryAnswer() {
+  const val = document.getElementById('recovery-answer-check').value.trim().toLowerCase();
+  document.getElementById('recovery-answer-check').value = "";
+  if (data.recovery && val && val === data.recovery.answer) {
+    mode = "resetPin";
+    pinBuffer = "";
+    renderLock();
+    showToast("Resposta correta! Crie um novo PIN.");
+  } else {
+    showToast("Resposta incorreta");
+  }
+}
+window.checkRecoveryAnswer = checkRecoveryAnswer;
+
+function finishSenhasUnlock() {
+  senhasUnlocked = true;
+  document.getElementById('lock').style.display = 'none';
+  document.getElementById('main').style.display = 'flex';
+  activeTab = 'senhas';
+  searchOpen = false;
+  document.getElementById('search-wrap').classList.remove('open');
+  document.getElementById('search-input').value = "";
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'senhas'));
+  document.getElementById('section-title').textContent = TAB_ICON.senhas + " " + TAB_LABELS.senhas;
   renderList();
 }
 
 /* =========================== TABS =========================== */
 function switchTab(tab) {
+  if (tab === 'senhas' && !senhasUnlocked) {
+    lockReturnTab = activeTab;
+    openSenhasLock();
+    return;
+  }
   activeTab = tab;
   searchOpen = false;
   document.getElementById('search-wrap').classList.remove('open');
@@ -459,7 +621,8 @@ function renderList() {
 
   if (query) {
     items = items.filter(item => {
-      const haystack = [titleOf(item), item.body, item.user, item.notas].filter(Boolean).join(" ").toLowerCase();
+      const haystack = [titleOf(item), item.body, item.user, item.notas, item.ingredientes, item.preparo]
+        .filter(Boolean).join(" ").toLowerCase();
       return haystack.includes(query);
     });
   }
@@ -476,14 +639,15 @@ function renderList() {
     const msgs = {
       rascunhos: query ? "Nada encontrado." : "Nenhum rascunho ainda.<br>Toque em \"+\" para escrever.",
       lembretes: query ? "Nada encontrado." : "Nenhum lembrete ainda.<br>Toque em \"+\" para criar um.",
+      receitas: query ? "Nada encontrado." : "Nenhuma receita ainda.<br>Toque em \"+\" para adicionar.",
       senhas: query ? "Nada encontrado." : "Nenhuma senha guardada.<br>Toque em \"+\" para adicionar."
     };
     el.innerHTML = `<div class="empty"><span class="big">${query ? "🔎" : "🌤️"}</span>${msgs[activeTab]}</div>`;
     return;
   }
 
-  const typeClass = { rascunhos: "rascunho", lembretes: "lembrete", senhas: "senha" }[activeTab];
-  const badgeIcon = { rascunhos: "📝", lembretes: "🔔", senhas: "🔑" }[activeTab];
+  const typeClass = { rascunhos: "rascunho", lembretes: "lembrete", receitas: "receita", senhas: "senha" }[activeTab];
+  const badgeIcon = { rascunhos: "📝", lembretes: "🔔", receitas: "🍲", senhas: "🔑" }[activeTab];
 
   items.forEach(item => {
     const div = document.createElement('div');
@@ -496,6 +660,8 @@ function renderList() {
     } else if (activeTab === "lembretes") {
       bodyHtml = `<div class="card-body">${escapeHtml((item.body||"").slice(0,80))}</div>`;
       metaHtml = `<div class="card-meta lembrete">🔔 ${formatDate(item.whenISO)}</div>`;
+    } else if (activeTab === "receitas") {
+      bodyHtml = `<div class="card-body">${escapeHtml((item.ingredientes||"").slice(0,90))}</div>`;
     } else {
       bodyHtml = `<div class="card-body">${escapeHtml(item.user || "")}</div>`;
       metaHtml = `<div class="card-meta senha">🔑 ••••••••</div>`;
@@ -522,7 +688,7 @@ function formatDate(iso){
 /* =========================== EDITOR =========================== */
 function openEditor(id) {
   currentEditId = id;
-  ['rascunhos','lembretes','senhas'].forEach(t => {
+  ['rascunhos','lembretes','receitas','senhas'].forEach(t => {
     document.getElementById('fields-' + t).style.display = (t === activeTab) ? 'flex' : 'none';
   });
 
@@ -536,6 +702,10 @@ function openEditor(id) {
     document.getElementById('lembrete-title').value = item ? item.title : "";
     document.getElementById('lembrete-body').value = item ? item.body : "";
     document.getElementById('lembrete-when').value = item && item.whenISO ? item.whenISO.slice(0,16) : "";
+  } else if (activeTab === "receitas") {
+    document.getElementById('receita-title').value = item ? item.title : "";
+    document.getElementById('receita-ingredientes').value = item ? (item.ingredientes||"") : "";
+    document.getElementById('receita-preparo').value = item ? (item.preparo||"") : "";
   } else {
     document.getElementById('senha-site').value = item ? item.site : "";
     document.getElementById('senha-user').value = item ? item.user : "";
@@ -586,6 +756,17 @@ async function saveCurrentItem() {
       it.title = title; it.body = body; it.whenISO = whenISO;
     } else {
       list.push({ id: crypto.randomUUID(), title, body, whenISO, createdAt: Date.now() });
+    }
+  } else if (activeTab === "receitas") {
+    const title = document.getElementById('receita-title').value.trim();
+    const ingredientes = document.getElementById('receita-ingredientes').value;
+    const preparo = document.getElementById('receita-preparo').value;
+    if (!title && !ingredientes && !preparo) return closeEditor();
+    if (currentEditId) {
+      const it = list.find(x => x.id === currentEditId);
+      it.title = title; it.ingredientes = ingredientes; it.preparo = preparo;
+    } else {
+      list.push({ id: crypto.randomUUID(), title, ingredientes, preparo, createdAt: Date.now() });
     }
   } else {
     const site = document.getElementById('senha-site').value.trim();
@@ -661,6 +842,11 @@ function showToast(msg) {
 (async () => {
   await initFirebase();
   await loadFromCloud();
+  document.getElementById('version-tag').textContent = 'v' + APP_VERSION;
+  document.getElementById('main').style.display = 'flex';
+  requestNotificationPermission();
+  renderList();
+  scheduleAllReminders();
 })();
 </script>
 </body>
