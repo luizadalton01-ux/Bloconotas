@@ -394,27 +394,69 @@ const TAB_LABELS = { rascunhos: "Rascunhos", lembretes: "Lembretes", receitas: "
 const TAB_ICON = { rascunhos: "📝", lembretes: "🔔", receitas: "🍲", senhas: "🔑" };
 
 /* =========================== PERSISTÊNCIA =========================== */
-async function loadFromCloud() {
-  if (!firebaseReady) return;
-  const { doc, getDoc } = window.__fb;
-  const ref = doc(db, "notebooks", NOTEBOOK_ID);
-  const snap = await getDoc(ref);
-  if (snap.exists()) {
-    const d = snap.data();
+/* Armazenamento local: o app abre e funciona mesmo sem internet/nuvem.
+   O Firebase, quando disponível, sincroniza por cima em segundo plano. */
+const LOCAL_KEY = "caderno_app_dados_v1";
+
+function loadFromLocalStorage() {
+  try {
+    const raw = localStorage.getItem(LOCAL_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw);
     data.pin = d.pin || null;
     data.recovery = d.recovery || null;
     data.rascunhos = d.rascunhos || [];
     data.lembretes = d.lembretes || [];
     data.receitas = d.receitas || [];
     data.senhas = d.senhas || [];
+  } catch (e) {
+    console.warn("Armazenamento local indisponível:", e);
+  }
+}
+
+function saveToLocalStorage() {
+  try {
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.warn("Não foi possível salvar localmente:", e);
+  }
+}
+
+async function loadFromCloud() {
+  if (!firebaseReady) return;
+  try {
+    const { doc, getDoc } = window.__fb;
+    const ref = doc(db, "notebooks", NOTEBOOK_ID);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      const d = snap.data();
+      data.pin = d.pin || null;
+      data.recovery = d.recovery || null;
+      data.rascunhos = d.rascunhos || [];
+      data.lembretes = d.lembretes || [];
+      data.receitas = d.receitas || [];
+      data.senhas = d.senhas || [];
+      saveToLocalStorage();
+    }
+  } catch (e) {
+    console.warn("Não foi possível carregar da nuvem, usando dados locais:", e);
+    firebaseReady = false;
+    setSyncStatus(false);
   }
 }
 
 async function saveToCloud() {
+  saveToLocalStorage();
   if (!firebaseReady) return;
-  const { doc, setDoc } = window.__fb;
-  const ref = doc(db, "notebooks", NOTEBOOK_ID);
-  await setDoc(ref, data, { merge: true });
+  try {
+    const { doc, setDoc } = window.__fb;
+    const ref = doc(db, "notebooks", NOTEBOOK_ID);
+    await setDoc(ref, data, { merge: true });
+  } catch (e) {
+    console.warn("Falha ao sincronizar com a nuvem, dados mantidos localmente:", e);
+    firebaseReady = false;
+    setSyncStatus(false);
+  }
 }
 
 /* =========================== TELA DE PIN (protege apenas "Senhas") =========================== */
@@ -839,14 +881,30 @@ function showToast(msg) {
 }
 
 /* =========================== BOOT =========================== */
+/* 1) Abre o app imediatamente com os dados salvos no aparelho (localStorage),
+      sem depender de internet ou do Firebase.
+   2) Em segundo plano, tenta conectar à nuvem; se conseguir, sincroniza.
+      Se falhar (sem internet, rede bloqueada etc.), o app continua
+      funcionando normalmente apenas com o armazenamento local. */
 (async () => {
-  await initFirebase();
-  await loadFromCloud();
+  try { loadFromLocalStorage(); } catch (e) { console.warn(e); }
+
   document.getElementById('version-tag').textContent = 'v' + APP_VERSION;
   document.getElementById('main').style.display = 'flex';
   requestNotificationPermission();
   renderList();
   scheduleAllReminders();
+
+  try {
+    await initFirebase();
+    if (firebaseReady) {
+      await loadFromCloud();
+      renderList();
+      scheduleAllReminders();
+    }
+  } catch (e) {
+    console.warn("Sincronização com a nuvem indisponível, app funcionando localmente:", e);
+  }
 })();
 </script>
 </body>
