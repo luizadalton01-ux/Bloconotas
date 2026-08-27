@@ -238,7 +238,7 @@
         <button class="icon-btn" id="save-btn" onclick="manualSave()" title="Salvar na nuvem">☁️</button>
         <button class="icon-btn" id="search-btn" onclick="toggleSearch()">🔍</button>
         <button class="icon-btn" id="sort-btn" onclick="toggleSort()">↕️</button>
-        <span id="sync-dot"></span>
+        <span id="sync-dot" onclick="showSyncInfo()" style="cursor:pointer;"></span>
       </div>
     </header>
     <div id="search-wrap"><input id="search-input" type="text" placeholder="Buscar..." oninput="renderList()"></div>
@@ -332,6 +332,7 @@ const NOTEBOOK_ID = "meu-caderno";
 
 let db = null;
 let firebaseReady = false;
+let lastFirebaseError = null; // guarda o motivo legível da última falha, para diagnóstico
 
 async function initFirebase() {
   try {
@@ -342,6 +343,7 @@ async function initFirebase() {
     db = getFirestore(app);
     window.__fb = { doc, getDoc, setDoc };
     firebaseReady = true;
+    lastFirebaseError = null;
     setSyncStatus(true);
 
     // Analytics é opcional: se o domínio não estiver autorizado no console
@@ -355,8 +357,24 @@ async function initFirebase() {
   } catch (e) {
     console.error("Firebase não conectado:", e);
     firebaseReady = false;
+    lastFirebaseError = describeFirebaseError(e);
     setSyncStatus(false);
   }
+}
+
+/* Traduz o erro técnico em uma mensagem curta e legível para mostrar na tela */
+function describeFirebaseError(e) {
+  const msg = (e && (e.message || e.code || String(e))) || "erro desconhecido";
+  if (/Failed to fetch dynamically imported module|NetworkError|Failed to fetch/i.test(msg)) {
+    return "sem acesso à internet / rede bloqueada";
+  }
+  if (/permission-denied/i.test(msg)) {
+    return "permissão negada nas regras do Firestore";
+  }
+  if (/not-found|Cloud Firestore API|database.*not.*exist/i.test(msg)) {
+    return "banco Firestore não criado no projeto";
+  }
+  return msg.slice(0, 80);
 }
 
 function setSyncStatus(on) {
@@ -446,6 +464,7 @@ async function loadFromCloud() {
   } catch (e) {
     console.warn("Não foi possível carregar da nuvem, usando dados locais:", e);
     firebaseReady = false;
+    lastFirebaseError = describeFirebaseError(e);
     setSyncStatus(false);
   }
 }
@@ -487,6 +506,7 @@ async function saveToCloud() {
   } catch (e) {
     console.warn("Falha ao sincronizar com a nuvem, dados mantidos localmente:", e);
     firebaseReady = false;
+    lastFirebaseError = describeFirebaseError(e);
     setSyncStatus(false);
     return false;
   }
@@ -501,9 +521,19 @@ async function manualSave() {
   }
   const ok = await saveToCloud();
   if (btn) btn.classList.remove('active-state');
-  showToast(ok ? "☁️ Salvo na nuvem" : "Sem conexão — salvo apenas neste aparelho");
+  showToast(ok ? "☁️ Salvo na nuvem" : "⚠️ Não salvou na nuvem: " + (lastFirebaseError || "motivo desconhecido"));
 }
 window.manualSave = manualSave;
+
+/* Toque na bolinha de status mostra o motivo da falha (diagnóstico) */
+function showSyncInfo() {
+  if (firebaseReady) {
+    showToast("☁️ Conectado à nuvem" + (lastSyncAt ? " • último salvamento registrado" : ""));
+  } else {
+    showToast("🔴 Sem nuvem: " + (lastFirebaseError || "ainda não tentou conectar"));
+  }
+}
+window.showSyncInfo = showSyncInfo;
 
 /* =========================== TELA DE PIN (protege apenas "Senhas") =========================== */
 const PIN_MODES = ["createPin", "checkPin", "resetPin"];
