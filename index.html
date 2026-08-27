@@ -334,11 +334,25 @@ let db = null;
 let firebaseReady = false;
 let lastFirebaseError = null; // guarda o motivo legível da última falha, para diagnóstico
 
+/* Evita que o app fique esperando para sempre uma resposta do Firebase que
+   nunca chega (comum quando a rede bloqueia silenciosamente a conexão) */
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Tempo esgotado ao ${label}`)), ms)
+    )
+  ]);
+}
+
 async function initFirebase() {
   try {
-    const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
-    const { getFirestore, doc, getDoc, setDoc } =
-      await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+    const { initializeApp } = await withTimeout(
+      import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"), 10000, "carregar o Firebase (app)"
+    );
+    const { getFirestore, doc, getDoc, setDoc } = await withTimeout(
+      import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"), 10000, "carregar o Firebase (banco)"
+    );
     const app = initializeApp(firebaseConfig);
     db = getFirestore(app);
     window.__fb = { doc, getDoc, setDoc };
@@ -349,7 +363,9 @@ async function initFirebase() {
     // Analytics é opcional: se o domínio não estiver autorizado no console
     // do Firebase, isso falha silenciosamente sem afetar o restante do app.
     try {
-      const { getAnalytics } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics.js");
+      const { getAnalytics } = await withTimeout(
+        import("https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics.js"), 8000, "carregar o Analytics"
+      );
       getAnalytics(app);
     } catch (eAnalytics) {
       console.warn("Analytics não inicializado:", eAnalytics);
@@ -365,6 +381,9 @@ async function initFirebase() {
 /* Traduz o erro técnico em uma mensagem curta e legível para mostrar na tela */
 function describeFirebaseError(e) {
   const msg = (e && (e.message || e.code || String(e))) || "erro desconhecido";
+  if (/Tempo esgotado/i.test(msg)) {
+    return "conexão travou (rede bloqueando o Firebase silenciosamente)";
+  }
   if (/Failed to fetch dynamically imported module|NetworkError|Failed to fetch/i.test(msg)) {
     return "sem acesso à internet / rede bloqueada";
   }
@@ -450,7 +469,7 @@ async function loadFromCloud() {
   try {
     const { doc, getDoc } = window.__fb;
     const ref = doc(db, "notebooks", NOTEBOOK_ID);
-    const snap = await getDoc(ref);
+    const snap = await withTimeout(getDoc(ref), 10000, "carregar os dados da nuvem");
     if (snap.exists()) {
       const d = snap.data();
       data.pin = d.pin || null;
@@ -498,7 +517,7 @@ async function saveToCloud() {
   try {
     const { doc, setDoc } = window.__fb;
     const ref = doc(db, "notebooks", NOTEBOOK_ID);
-    await setDoc(ref, data, { merge: true });
+    await withTimeout(setDoc(ref, data, { merge: true }), 10000, "salvar na nuvem");
     lastSyncAt = Date.now();
     try { localStorage.setItem(LAST_SYNC_KEY, String(lastSyncAt)); } catch (e) { /* ignora */ }
     updateLastSyncLabel();
@@ -516,6 +535,7 @@ async function saveToCloud() {
 async function manualSave() {
   const btn = document.getElementById('save-btn');
   if (btn) btn.classList.add('active-state');
+  showToast("☁️ Salvando...");
   if (!firebaseReady) {
     try { await initFirebase(); } catch (e) { /* segue tentando abaixo */ }
   }
@@ -953,7 +973,8 @@ function showToast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+  const duration = Math.min(6000, Math.max(2200, msg.length * 55));
+  toastTimer = setTimeout(() => t.classList.remove('show'), duration);
 }
 
 /* =========================== BOOT =========================== */
