@@ -86,6 +86,7 @@
   .icon-btn.active-state{background:#fff; color:var(--blue);}
   #sync-dot{width:8px;height:8px;border-radius:50%; background:rgba(255,255,255,.5); display:inline-block;}
   #sync-dot.on{background:var(--ok);}
+  #last-saved-label{font-size:10px; color:var(--ink-soft); opacity:.85; font-weight:600; text-align:right;}
 
   /* ---------- SEARCH BAR ---------- */
   #search-wrap{padding:0 20px; max-height:0; overflow:hidden; transition:max-height .2s ease, padding .2s ease;}
@@ -97,7 +98,7 @@
   }
   #sort-label{
     padding:8px 20px 0; font-size:11px; color:var(--ink-soft); font-weight:700;
-    display:flex; align-items:center; gap:5px;
+    display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;
   }
 
   /* ---------- LIST ---------- */
@@ -234,13 +235,17 @@
     <header>
       <h1 id="section-title">Rascunhos</h1>
       <div class="header-right">
+        <button class="icon-btn" id="save-btn" onclick="manualSave()" title="Salvar na nuvem">☁️</button>
         <button class="icon-btn" id="search-btn" onclick="toggleSearch()">🔍</button>
         <button class="icon-btn" id="sort-btn" onclick="toggleSort()">↕️</button>
         <span id="sync-dot"></span>
       </div>
     </header>
     <div id="search-wrap"><input id="search-input" type="text" placeholder="Buscar..." oninput="renderList()"></div>
-    <div id="sort-label">Ordenar: <span id="sort-current">mais recentes</span></div>
+    <div id="sort-label">
+      <span>Ordenar: <span id="sort-current">mais recentes</span></span>
+      <span id="last-saved-label">Ainda não salvo na nuvem</span>
+    </div>
     <div id="list"></div>
     <div id="version-tag"></div>
     <button id="fab" onclick="openEditor(null)">+</button>
@@ -445,19 +450,60 @@ async function loadFromCloud() {
   }
 }
 
+/* ---- Data/hora do último salvamento na nuvem ---- */
+const LAST_SYNC_KEY = "caderno_ultimo_salvamento_v1";
+let lastSyncAt = null;
+
+function loadLastSyncFromLocal() {
+  try {
+    const raw = localStorage.getItem(LAST_SYNC_KEY);
+    if (raw) lastSyncAt = parseInt(raw, 10) || null;
+  } catch (e) { /* ignora */ }
+}
+
+function updateLastSyncLabel() {
+  const el = document.getElementById('last-saved-label');
+  if (!el) return;
+  if (!lastSyncAt) { el.textContent = "Ainda não salvo na nuvem"; return; }
+  const d = new Date(lastSyncAt);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const dateStr = sameDay ? "hoje" : d.toLocaleDateString('pt-BR');
+  el.textContent = `Salvo ${dateStr} às ${time}`;
+}
+
 async function saveToCloud() {
   saveToLocalStorage();
-  if (!firebaseReady) return;
+  if (!firebaseReady) return false;
   try {
     const { doc, setDoc } = window.__fb;
     const ref = doc(db, "notebooks", NOTEBOOK_ID);
     await setDoc(ref, data, { merge: true });
+    lastSyncAt = Date.now();
+    try { localStorage.setItem(LAST_SYNC_KEY, String(lastSyncAt)); } catch (e) { /* ignora */ }
+    updateLastSyncLabel();
+    return true;
   } catch (e) {
     console.warn("Falha ao sincronizar com a nuvem, dados mantidos localmente:", e);
     firebaseReady = false;
     setSyncStatus(false);
+    return false;
   }
 }
+
+/* Botão "Salvar na nuvem" no cabeçalho: força uma tentativa de sincronização agora */
+async function manualSave() {
+  const btn = document.getElementById('save-btn');
+  if (btn) btn.classList.add('active-state');
+  if (!firebaseReady) {
+    try { await initFirebase(); } catch (e) { /* segue tentando abaixo */ }
+  }
+  const ok = await saveToCloud();
+  if (btn) btn.classList.remove('active-state');
+  showToast(ok ? "☁️ Salvo na nuvem" : "Sem conexão — salvo apenas neste aparelho");
+}
+window.manualSave = manualSave;
 
 /* =========================== TELA DE PIN (protege apenas "Senhas") =========================== */
 const PIN_MODES = ["createPin", "checkPin", "resetPin"];
@@ -888,6 +934,7 @@ function showToast(msg) {
       funcionando normalmente apenas com o armazenamento local. */
 (async () => {
   try { loadFromLocalStorage(); } catch (e) { console.warn(e); }
+  try { loadLastSyncFromLocal(); updateLastSyncLabel(); } catch (e) { console.warn(e); }
 
   document.getElementById('version-tag').textContent = 'v' + APP_VERSION;
   document.getElementById('main').style.display = 'flex';
