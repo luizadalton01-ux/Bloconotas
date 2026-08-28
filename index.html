@@ -43,13 +43,13 @@
   .screen{position:absolute; inset:0; z-index:1; display:flex; flex-direction:column; overflow:hidden;}
 
   /* ---------- LOCK SCREEN ---------- */
-  #lock{
+  #lock, #cloud-login{
     align-items:center; justify-content:center; text-align:center; padding:24px; gap:18px;
     background:radial-gradient(circle at 30% 20%, var(--turq-bg), transparent 60%),
                radial-gradient(circle at 80% 80%, var(--coral-bg), transparent 55%),
                var(--paper);
   }
-  #lock h1{font-size:46px; background:linear-gradient(90deg,var(--blue),var(--lime)); -webkit-background-clip:text; background-clip:text; color:transparent;}
+  #lock h1, #cloud-login h1{font-size:46px; background:linear-gradient(90deg,var(--blue),var(--lime)); -webkit-background-clip:text; background-clip:text; color:transparent;}
   .pin-dots{display:flex; gap:14px; margin:6px 0 10px;}
   .pin-dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--blue); background:transparent;}
   .pin-dot.filled{background:var(--blue);}
@@ -63,7 +63,7 @@
   .key:active{background:var(--blue); color:#fff; box-shadow:none; transform:translateY(2px);}
   #lock-msg{font-size:13px; color:var(--coral); min-height:16px; font-weight:600;}
   #setup-note{font-size:12px; color:var(--ink-soft); max-width:280px; line-height:1.5;}
-  #lock-cancel{position:absolute; top:16px; left:16px;}
+  #lock-cancel, #cloud-login-cancel{position:absolute; top:16px; left:16px;}
   #forgot-pin-btn{margin-top:2px;}
   #recovery-setup, #recovery-answer-wrap{width:100%; max-width:280px;}
   #recovery-question-display{font-size:13px; color:var(--ink-soft); font-weight:700; line-height:1.4;}
@@ -193,6 +193,7 @@
     font-family:'Fredoka',sans-serif; font-weight:600; font-size:15px; cursor:pointer;
   }
   .btn-primary{background:linear-gradient(120deg,var(--blue),var(--lime)); color:#fff; box-shadow:0 5px 14px rgba(61,139,253,.4);}
+  .btn-secondary{background:#fff; color:var(--coral); border:2px solid var(--coral);}
   .toast{
     position:absolute; bottom:150px; left:50%; transform:translateX(-50%);
     background:var(--ink); color:#fff; padding:9px 18px; border-radius:20px;
@@ -228,6 +229,46 @@
     </div>
 
     <button class="link-btn" id="forgot-pin-btn" onclick="startRecovery()" style="display:none;">Esqueci meu PIN</button>
+
+    <!-- Senha mestra: chave real de criptografia das senhas (separada do PIN) -->
+    <div id="master-pass-setup" style="display:none; flex-direction:column; gap:10px;">
+      <div style="font-size:12px; color:var(--coral); font-weight:700; line-height:1.5;">
+        ⚠️ Esta senha mestra criptografa suas senhas de verdade. Ela é diferente do PIN
+        e <u>não pode ser recuperada</u> se você esquecer — anote em um lugar seguro,
+        fora do celular.
+      </div>
+      <input id="master-pass-input" type="password" placeholder="Crie uma senha mestra (mín. 8 caracteres)" autocomplete="new-password">
+      <input id="master-pass-confirm" type="password" placeholder="Repita a senha mestra" autocomplete="new-password">
+      <button class="btn btn-primary" onclick="confirmMasterPasswordSetup()">Criar e continuar</button>
+    </div>
+
+    <div id="master-pass-check" style="display:none; flex-direction:column; gap:10px;">
+      <div style="font-size:12px; color:var(--ink-soft); font-weight:600;">Senha mestra (criptografia)</div>
+      <input id="master-pass-check-input" type="password" placeholder="Digite sua senha mestra" autocomplete="current-password">
+      <button class="btn btn-primary" onclick="confirmMasterPasswordCheck()">Desbloquear senhas</button>
+    </div>
+  </div>
+
+  <!-- LOGIN NA NUVEM (protege o banco de dados inteiro no Firestore) -->
+  <div id="cloud-login" class="screen" style="display:none;">
+    <button class="link-btn" id="cloud-login-cancel" onclick="cancelCloudLogin()">‹ Fechar</button>
+    <h1 id="cloud-login-title">Login na nuvem</h1>
+
+    <div id="cloud-login-form" style="display:none; flex-direction:column; gap:10px; width:100%; max-width:280px;">
+      <div id="cloud-login-note" style="font-size:12px; color:var(--ink-soft); line-height:1.5;"></div>
+      <input id="cloud-email" type="email" placeholder="E-mail" autocomplete="username">
+      <input id="cloud-password" type="password" placeholder="Senha (mín. 6 caracteres)" autocomplete="current-password">
+      <button class="btn btn-primary" id="cloud-login-submit-btn" onclick="submitCloudLogin()">Entrar</button>
+      <button class="link-btn" id="cloud-login-toggle-btn" onclick="toggleCloudAuthMode()">Ainda não tenho conta — criar</button>
+    </div>
+
+    <div id="cloud-logged-in" style="display:none; flex-direction:column; gap:10px; width:100%; max-width:280px; text-align:center;">
+      <div style="font-size:13px; color:var(--ink-soft);">Conectado como</div>
+      <div id="cloud-logged-email" style="font-size:15px; font-weight:700; color:var(--ink);"></div>
+      <div style="font-size:11px; color:var(--ink-soft); margin-top:6px;">Seu UID (para configurar as regras do Firestore):</div>
+      <div id="cloud-logged-uid" style="font-size:11px; font-family:monospace; background:#fff; border-radius:8px; padding:8px; word-break:break-all;"></div>
+      <button class="btn btn-secondary" onclick="signOutCloud()">Sair desta conta</button>
+    </div>
   </div>
 
   <!-- MAIN -->
@@ -328,11 +369,15 @@ const firebaseConfig = {
   appId: "1:623385731054:web:522dfcda0cb92fbbbeb8ff",
   measurementId: "G-S3V3VVJ971"
 };
-const NOTEBOOK_ID = "meu-caderno";
+// Identificador único e imprevisível do seu caderno no Firestore.
+// As regras do Firestore devem permitir acesso SOMENTE a este documento exato
+// (veja as instruções que o Claude te passou para configurar isso no console).
+const NOTEBOOK_ID = "m2m1ee7udzq1f2j033149te8grd47nw9";
 
 let db = null;
 let firebaseReady = false;
 let lastFirebaseError = null; // guarda o motivo legível da última falha, para diagnóstico
+let currentUser = null;       // usuário autenticado no Firebase (null = não logado)
 
 /* Evita que o app fique esperando para sempre uma resposta do Firebase que
    nunca chega (comum quando a rede bloqueia silenciosamente a conexão) */
@@ -345,6 +390,14 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
+/* Espera o Firebase Auth informar se já existe uma sessão salva no aparelho
+   (login persistido), sem travar o app caso isso nunca responda. */
+function waitForAuthState(auth, onAuthStateChanged, ms) {
+  return withTimeout(new Promise(resolve => {
+    const unsub = onAuthStateChanged(auth, (user) => { unsub(); resolve(user); });
+  }), ms, "verificar login salvo");
+}
+
 async function initFirebase() {
   try {
     const { initializeApp } = await withTimeout(
@@ -353,12 +406,24 @@ async function initFirebase() {
     const { getFirestore, doc, getDoc, setDoc } = await withTimeout(
       import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"), 10000, "carregar o Firebase (banco)"
     );
+    const { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } =
+      await withTimeout(
+        import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"), 10000, "carregar o Firebase (login)"
+      );
     const app = initializeApp(firebaseConfig);
     db = getFirestore(app);
+    const auth = getAuth(app);
     window.__fb = { doc, getDoc, setDoc };
+    window.__fbAuth = { auth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut };
     firebaseReady = true;
     lastFirebaseError = null;
     setSyncStatus(true);
+
+    try {
+      currentUser = await waitForAuthState(auth, onAuthStateChanged, 6000);
+    } catch (eAuth) {
+      currentUser = null;
+    }
 
     // Analytics é opcional: se o domínio não estiver autorizado no console
     // do Firebase, isso falha silenciosamente sem afetar o restante do app.
@@ -388,10 +453,28 @@ function describeFirebaseError(e) {
     return "sem acesso à internet / rede bloqueada";
   }
   if (/permission-denied/i.test(msg)) {
-    return "permissão negada nas regras do Firestore";
+    return "permissão negada — faça login na nuvem (☁️) ou revise as regras do Firestore";
   }
   if (/not-found|Cloud Firestore API|database.*not.*exist/i.test(msg)) {
     return "banco Firestore não criado no projeto";
+  }
+  if (/auth\/wrong-password|auth\/invalid-credential/i.test(msg)) {
+    return "e-mail ou senha incorretos";
+  }
+  if (/auth\/user-not-found/i.test(msg)) {
+    return "não existe conta com esse e-mail (toque em \"Criar conta\")";
+  }
+  if (/auth\/email-already-in-use/i.test(msg)) {
+    return "já existe uma conta com esse e-mail (toque em \"Já tenho conta\")";
+  }
+  if (/auth\/weak-password/i.test(msg)) {
+    return "senha muito curta (mínimo 6 caracteres)";
+  }
+  if (/auth\/invalid-email/i.test(msg)) {
+    return "e-mail inválido";
+  }
+  if (/auth\/too-many-requests/i.test(msg)) {
+    return "muitas tentativas — aguarde um pouco e tente de novo";
   }
   return msg.slice(0, 80);
 }
@@ -420,10 +503,12 @@ let data = {
   rascunhos: [],
   lembretes: [],
   receitas: [],
-  senhas: []
+  senhas: [],       // entradas cifradas: { id, iv, ct, createdAt }
+  senhasSalt: null, // salt (não secreto) usado para derivar a chave da senha mestra
+  senhasEncrypted: false
 };
 let pinBuffer = "";
-let mode = "checkPin"; // createPin | checkPin | createRecovery | recoverAnswer | resetPin
+let mode = "checkPin"; // createPin | checkPin | createRecovery | recoverAnswer | resetPin | createMasterPassword | checkMasterPassword
 let activeTab = "rascunhos";
 let currentEditId = null;
 let scheduledTimers = {};
@@ -451,6 +536,8 @@ function loadFromLocalStorage() {
     data.lembretes = d.lembretes || [];
     data.receitas = d.receitas || [];
     data.senhas = d.senhas || [];
+    data.senhasSalt = d.senhasSalt || null;
+    data.senhasEncrypted = !!d.senhasEncrypted;
   } catch (e) {
     console.warn("Armazenamento local indisponível:", e);
   }
@@ -478,6 +565,8 @@ async function loadFromCloud() {
       data.lembretes = d.lembretes || [];
       data.receitas = d.receitas || [];
       data.senhas = d.senhas || [];
+      data.senhasSalt = d.senhasSalt || null;
+      data.senhasEncrypted = !!d.senhasEncrypted;
       saveToLocalStorage();
     }
   } catch (e) {
@@ -531,29 +620,215 @@ async function saveToCloud() {
   }
 }
 
+/* =========================== CRIPTOGRAFIA DA ABA "SENHAS" ===========================
+   As senhas guardadas nesta aba são criptografadas (AES-256-GCM) ANTES de saírem do
+   aparelho — tanto para o armazenamento local quanto para a nuvem. A chave é derivada
+   (PBKDF2, 200.000 iterações) de uma "senha mestra" que o usuário escolhe e que NUNCA
+   é enviada, salva ou armazenada em lugar nenhum — só existe na memória enquanto o app
+   está aberto. Sem essa senha mestra, os dados salvos são apenas texto cifrado
+   ilegível, mesmo que alguém tenha acesso direto ao banco de dados na nuvem.
+   IMPORTANTE: essa senha mestra não tem recuperação. Se for esquecida, as senhas já
+   salvas não podem ser lidas nunca mais — é assim que uma criptografia de verdade
+   funciona (se pudesse ser "recuperada" sem ela, não seria segura). */
+let senhasMasterKey = null;   // CryptoKey, só em memória, nunca persistida
+let decryptedSenhas = [];     // cache em memória das senhas decifradas nesta sessão
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  bytes.forEach(b => binary += String.fromCharCode(b));
+  return btoa(binary);
+}
+function base64ToBytes(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function deriveMasterKey(password, saltB64) {
+  const enc = new TextEncoder();
+  const salt = base64ToBytes(saltB64);
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: 200000, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptSenhaEntry(plainObj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const enc = new TextEncoder();
+  const ctBuf = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv }, senhasMasterKey, enc.encode(JSON.stringify(plainObj))
+  );
+  return { iv: bytesToBase64(iv), ct: bytesToBase64(new Uint8Array(ctBuf)) };
+}
+
+async function decryptSenhaEntry(encEntry) {
+  const iv = base64ToBytes(encEntry.iv);
+  const ctBytes = base64ToBytes(encEntry.ct);
+  const ptBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, senhasMasterKey, ctBytes);
+  return JSON.parse(new TextDecoder().decode(ptBuf));
+}
+
+/* Decifra todas as entradas salvas para a lista em memória; lança erro se a
+   senha mestra estiver incorreta (falha na decifragem = senha errada). */
+async function refreshDecryptedSenhas() {
+  const out = [];
+  for (const item of (data.senhas || [])) {
+    const plain = await decryptSenhaEntry(item);
+    out.push({
+      id: item.id, site: plain.site || "", user: plain.user || "",
+      pass: plain.pass || "", notas: plain.notas || "", createdAt: item.createdAt || 0
+    });
+  }
+  decryptedSenhas = out;
+}
+
 /* Botão "Salvar na nuvem" no cabeçalho: força uma tentativa de sincronização agora */
+/* Botão "Salvar na nuvem" no cabeçalho: força uma tentativa de sincronização agora.
+   Exige estar logado (Firebase Auth); se não estiver, abre a tela de login primeiro
+   e retoma o salvamento automaticamente assim que o login for concluído. */
 async function manualSave() {
   const btn = document.getElementById('save-btn');
   if (btn) btn.classList.add('active-state');
-  showToast("☁️ Salvando...");
+  showToast("☁️ Conectando...");
   if (!firebaseReady) {
     try { await initFirebase(); } catch (e) { /* segue tentando abaixo */ }
   }
+  if (btn) btn.classList.remove('active-state');
+
+  if (firebaseReady && !currentUser) {
+    pendingCloudAction = 'save';
+    openCloudLogin();
+    return;
+  }
+
+  if (btn) btn.classList.add('active-state');
+  showToast("☁️ Salvando...");
   const ok = await saveToCloud();
   if (btn) btn.classList.remove('active-state');
   showToast(ok ? "☁️ Salvo na nuvem" : "⚠️ Não salvou na nuvem: " + (lastFirebaseError || "motivo desconhecido"));
 }
 window.manualSave = manualSave;
 
-/* Toque na bolinha de status mostra o motivo da falha (diagnóstico) */
+/* Toque na bolinha de status: mostra o que está acontecendo com a nuvem */
 function showSyncInfo() {
-  if (firebaseReady) {
-    showToast("☁️ Conectado à nuvem" + (lastSyncAt ? " • último salvamento registrado" : ""));
-  } else {
+  if (!firebaseReady) {
     showToast("🔴 Sem nuvem: " + (lastFirebaseError || "ainda não tentou conectar"));
+  } else if (!currentUser) {
+    showToast("🔓 Conectado, mas sem login. Toque em ☁️ para entrar.");
+  } else {
+    showToast("☁️ Logado como " + currentUser.email);
   }
 }
 window.showSyncInfo = showSyncInfo;
+
+/* =========================== LOGIN NA NUVEM (Firebase Authentication) ===========================
+   Protege o banco de dados inteiro: a regra do Firestore só libera leitura/escrita para
+   quem estiver autenticado com a conta específica configurada nas regras (por UID). */
+let cloudAuthMode = "login"; // "login" | "signup"
+let pendingCloudAction = null; // ação a retomar depois de logar (ex: "save")
+
+function openCloudLogin() {
+  document.getElementById('main').style.display = 'none';
+  document.getElementById('cloud-login').style.display = 'flex';
+  renderCloudLogin();
+}
+window.openCloudLogin = openCloudLogin;
+
+function cancelCloudLogin() {
+  pendingCloudAction = null;
+  document.getElementById('cloud-email').value = "";
+  document.getElementById('cloud-password').value = "";
+  document.getElementById('cloud-login').style.display = 'none';
+  document.getElementById('main').style.display = 'flex';
+}
+window.cancelCloudLogin = cancelCloudLogin;
+
+function renderCloudLogin() {
+  const loggedIn = !!currentUser;
+  document.getElementById('cloud-login-form').style.display = loggedIn ? 'none' : 'flex';
+  document.getElementById('cloud-logged-in').style.display = loggedIn ? 'flex' : 'none';
+  document.getElementById('cloud-login-title').textContent = loggedIn ? "Conta na nuvem" : "Login na nuvem";
+
+  if (loggedIn) {
+    document.getElementById('cloud-logged-email').textContent = currentUser.email || "";
+    document.getElementById('cloud-logged-uid').textContent = currentUser.uid || "";
+  } else {
+    const note = cloudAuthMode === "signup"
+      ? "Criando sua conta pela primeira vez. Guarde bem este e-mail e senha."
+      : "Entre com o e-mail e senha da sua conta na nuvem.";
+    document.getElementById('cloud-login-note').textContent = note;
+    document.getElementById('cloud-login-submit-btn').textContent = cloudAuthMode === "signup" ? "Criar conta" : "Entrar";
+    document.getElementById('cloud-login-toggle-btn').textContent = cloudAuthMode === "signup"
+      ? "Já tenho conta — entrar"
+      : "Ainda não tenho conta — criar";
+  }
+}
+
+function toggleCloudAuthMode() {
+  cloudAuthMode = cloudAuthMode === "signup" ? "login" : "signup";
+  renderCloudLogin();
+}
+window.toggleCloudAuthMode = toggleCloudAuthMode;
+
+async function submitCloudLogin() {
+  const email = document.getElementById('cloud-email').value.trim();
+  const password = document.getElementById('cloud-password').value;
+  if (!email || !password) { showToast("Preencha e-mail e senha"); return; }
+  if (!firebaseReady) {
+    try { await initFirebase(); } catch (e) { /* tenta abaixo mesmo assim */ }
+  }
+  if (!firebaseReady || !window.__fbAuth) {
+    showToast("Sem conexão com o Firebase agora");
+    return;
+  }
+  const { auth, signInWithEmailAndPassword, createUserWithEmailAndPassword } = window.__fbAuth;
+  try {
+    const cred = cloudAuthMode === "signup"
+      ? await withTimeout(createUserWithEmailAndPassword(auth, email, password), 10000, "criar conta")
+      : await withTimeout(signInWithEmailAndPassword(auth, email, password), 10000, "entrar na conta");
+    currentUser = cred.user;
+    document.getElementById('cloud-email').value = "";
+    document.getElementById('cloud-password').value = "";
+    showToast(cloudAuthMode === "signup" ? "Conta criada e conectada ✓" : "Login feito ✓");
+
+    if (pendingCloudAction === 'save') {
+      pendingCloudAction = null;
+      document.getElementById('cloud-login').style.display = 'none';
+      document.getElementById('main').style.display = 'flex';
+      const ok = await saveToCloud();
+      showToast(ok ? "☁️ Salvo na nuvem" : "⚠️ Não salvou na nuvem: " + (lastFirebaseError || "motivo desconhecido"));
+    } else {
+      await loadFromCloud();
+      renderList();
+      renderCloudLogin();
+    }
+  } catch (e) {
+    console.warn("Falha no login:", e);
+    showToast("⚠️ " + describeFirebaseError(e));
+  }
+}
+window.submitCloudLogin = submitCloudLogin;
+
+async function signOutCloud() {
+  if (!window.__fbAuth) return;
+  try {
+    await window.__fbAuth.signOut(window.__fbAuth.auth);
+    currentUser = null;
+    showToast("Você saiu da conta na nuvem");
+    renderCloudLogin();
+  } catch (e) {
+    showToast("⚠️ " + describeFirebaseError(e));
+  }
+}
+window.signOutCloud = signOutCloud;
 
 /* =========================== TELA DE PIN (protege apenas "Senhas") =========================== */
 const PIN_MODES = ["createPin", "checkPin", "resetPin"];
@@ -565,13 +840,17 @@ function renderLock() {
   document.getElementById('recovery-setup').style.display = mode === 'createRecovery' ? 'flex' : 'none';
   document.getElementById('recovery-answer-wrap').style.display = mode === 'recoverAnswer' ? 'flex' : 'none';
   document.getElementById('forgot-pin-btn').style.display = (mode === 'checkPin' && data.recovery) ? 'block' : 'none';
+  document.getElementById('master-pass-setup').style.display = mode === 'createMasterPassword' ? 'flex' : 'none';
+  document.getElementById('master-pass-check').style.display = mode === 'checkMasterPassword' ? 'flex' : 'none';
 
   const titles = {
     createPin: "Crie um PIN",
     checkPin: "Senhas 🔒",
     createRecovery: "Recuperação",
     recoverAnswer: "Recuperar PIN",
-    resetPin: "Novo PIN"
+    resetPin: "Novo PIN",
+    createMasterPassword: "Proteger senhas",
+    checkMasterPassword: "Senhas 🔒🔑"
   };
   document.getElementById('lock-title').textContent = titles[mode] || "Caderno";
 
@@ -580,7 +859,9 @@ function renderLock() {
     checkPin: "",
     createRecovery: "Configure uma pergunta para recuperar seu PIN caso esqueça.",
     recoverAnswer: "",
-    resetPin: "Digite um novo PIN de 4 dígitos."
+    resetPin: "Digite um novo PIN de 4 dígitos.",
+    createMasterPassword: "",
+    checkMasterPassword: ""
   };
   document.getElementById('setup-note').textContent = notes[mode] || "";
   document.getElementById('lock-msg').textContent = "";
@@ -630,11 +911,11 @@ function handleKey(k) {
       data.pin = pinBuffer;
       pinBuffer = "";
       saveToCloud();
-      finishSenhasUnlock();
+      goToMasterPasswordStep();
     } else {
       if (pinBuffer === data.pin) {
         pinBuffer = "";
-        finishSenhasUnlock();
+        goToMasterPasswordStep();
       } else {
         msg.textContent = "PIN incorreto";
         setTimeout(() => { pinBuffer = ""; renderPinDots(); }, 350);
@@ -654,9 +935,13 @@ function openSenhasLock() {
 
 function cancelLock() {
   pinBuffer = "";
+  delete data.pinPending;
   document.getElementById('recovery-question-input').value = "";
   document.getElementById('recovery-answer-input').value = "";
   document.getElementById('recovery-answer-check').value = "";
+  document.getElementById('master-pass-input').value = "";
+  document.getElementById('master-pass-confirm').value = "";
+  document.getElementById('master-pass-check-input').value = "";
   document.getElementById('lock').style.display = 'none';
   document.getElementById('main').style.display = 'flex';
 }
@@ -672,7 +957,7 @@ function confirmRecoverySetup() {
   document.getElementById('recovery-question-input').value = "";
   document.getElementById('recovery-answer-input').value = "";
   saveToCloud();
-  finishSenhasUnlock();
+  goToMasterPasswordStep();
 }
 window.confirmRecoverySetup = confirmRecoverySetup;
 
@@ -697,6 +982,67 @@ function checkRecoveryAnswer() {
   }
 }
 window.checkRecoveryAnswer = checkRecoveryAnswer;
+
+/* Depois do PIN, exige a senha mestra (chave real de criptografia) antes de
+   liberar a aba Senhas. Se ainda não existe (data.senhasSalt vazio), pede
+   para criar; senão, pede para digitar. */
+function goToMasterPasswordStep() {
+  mode = data.senhasSalt ? "checkMasterPassword" : "createMasterPassword";
+  renderLock();
+}
+
+async function confirmMasterPasswordSetup() {
+  const p1 = document.getElementById('master-pass-input').value;
+  const p2 = document.getElementById('master-pass-confirm').value;
+  if (p1.length < 8) { showToast("Use pelo menos 8 caracteres"); return; }
+  if (p1 !== p2) { showToast("As senhas mestras não coincidem"); return; }
+
+  const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+  const saltB64 = bytesToBase64(saltBytes);
+
+  try {
+    senhasMasterKey = await deriveMasterKey(p1, saltB64);
+  } catch (e) {
+    showToast("Não foi possível criar a criptografia neste navegador");
+    return;
+  }
+  document.getElementById('master-pass-input').value = "";
+  document.getElementById('master-pass-confirm').value = "";
+
+  // Migra entradas antigas (salvas antes da criptografia existir, se houver) para cifradas.
+  const migrated = [];
+  for (const item of (data.senhas || [])) {
+    if (item.ct && item.iv) { migrated.push(item); continue; }
+    const enc = await encryptSenhaEntry({
+      site: item.site || "", user: item.user || "", pass: item.pass || "", notas: item.notas || ""
+    });
+    migrated.push({ id: item.id || crypto.randomUUID(), iv: enc.iv, ct: enc.ct, createdAt: item.createdAt || Date.now() });
+  }
+  data.senhas = migrated;
+  data.senhasSalt = saltB64;
+  data.senhasEncrypted = true;
+
+  await refreshDecryptedSenhas();
+  await saveToCloud();
+  finishSenhasUnlock();
+}
+window.confirmMasterPasswordSetup = confirmMasterPasswordSetup;
+
+async function confirmMasterPasswordCheck() {
+  const p = document.getElementById('master-pass-check-input').value;
+  document.getElementById('master-pass-check-input').value = "";
+  if (!p) return;
+  try {
+    const key = await deriveMasterKey(p, data.senhasSalt);
+    senhasMasterKey = key;
+    await refreshDecryptedSenhas(); // se a senha estiver errada, a decifragem falha aqui
+    finishSenhasUnlock();
+  } catch (e) {
+    senhasMasterKey = null;
+    showToast("Senha mestra incorreta");
+  }
+}
+window.confirmMasterPasswordCheck = confirmMasterPasswordCheck;
 
 function finishSenhasUnlock() {
   senhasUnlocked = true;
@@ -749,13 +1095,19 @@ function titleOf(item) {
   return (activeTab === "senhas" ? item.site : item.title) || "";
 }
 
+/* Para "senhas" usamos a lista decifrada em memória (nunca a criptografada
+   que fica em data.senhas); para as outras abas, os dados normais. */
+function getActiveList() {
+  return activeTab === "senhas" ? decryptedSenhas : data[activeTab];
+}
+
 /* =========================== LISTAGEM =========================== */
 function renderList() {
   const el = document.getElementById('list');
   el.innerHTML = "";
   const query = document.getElementById('search-input').value.trim().toLowerCase();
 
-  let items = [...data[activeTab]];
+  let items = [...getActiveList()];
 
   if (query) {
     items = items.filter(item => {
@@ -830,7 +1182,7 @@ function openEditor(id) {
     document.getElementById('fields-' + t).style.display = (t === activeTab) ? 'flex' : 'none';
   });
 
-  const item = id ? data[activeTab].find(x => x.id === id) : null;
+  const item = id ? getActiveList().find(x => x.id === id) : null;
   document.getElementById('delete-btn').style.display = item ? 'inline' : 'none';
 
   if (activeTab === "rascunhos") {
@@ -871,9 +1223,8 @@ function togglePassVisibility() {
 window.togglePassVisibility = togglePassVisibility;
 
 async function saveCurrentItem() {
-  const list = data[activeTab];
-
   if (activeTab === "rascunhos") {
+    const list = data.rascunhos;
     const title = document.getElementById('rascunho-title').value.trim();
     const body = document.getElementById('rascunho-body').value;
     if (!title && !body) return closeEditor();
@@ -884,6 +1235,7 @@ async function saveCurrentItem() {
       list.push({ id: crypto.randomUUID(), title, body, createdAt: Date.now() });
     }
   } else if (activeTab === "lembretes") {
+    const list = data.lembretes;
     const title = document.getElementById('lembrete-title').value.trim();
     const body = document.getElementById('lembrete-body').value;
     const whenVal = document.getElementById('lembrete-when').value;
@@ -896,6 +1248,7 @@ async function saveCurrentItem() {
       list.push({ id: crypto.randomUUID(), title, body, whenISO, createdAt: Date.now() });
     }
   } else if (activeTab === "receitas") {
+    const list = data.receitas;
     const title = document.getElementById('receita-title').value.trim();
     const ingredientes = document.getElementById('receita-ingredientes').value;
     const preparo = document.getElementById('receita-preparo').value;
@@ -907,17 +1260,27 @@ async function saveCurrentItem() {
       list.push({ id: crypto.randomUUID(), title, ingredientes, preparo, createdAt: Date.now() });
     }
   } else {
+    // Senhas: cifra antes de gravar em data.senhas; mantém a versão decifrada em memória.
     const site = document.getElementById('senha-site').value.trim();
     const user = document.getElementById('senha-user').value.trim();
     const pass = document.getElementById('senha-pass').value;
     const notas = document.getElementById('senha-notas').value;
     if (!site) { showToast("Informe o site/serviço"); return; }
-    if (currentEditId) {
-      const it = list.find(x => x.id === currentEditId);
-      it.site = site; it.user = user; it.pass = pass; it.notas = notas;
-    } else {
-      list.push({ id: crypto.randomUUID(), site, user, pass, notas, createdAt: Date.now() });
-    }
+    if (!senhasMasterKey) { showToast("Sessão de segurança expirou, reabra a aba Senhas"); return; }
+
+    const id = currentEditId || crypto.randomUUID();
+    const createdAt = currentEditId
+      ? (decryptedSenhas.find(x => x.id === currentEditId)?.createdAt || Date.now())
+      : Date.now();
+    const enc = await encryptSenhaEntry({ site, user, pass, notas });
+    const encEntry = { id, iv: enc.iv, ct: enc.ct, createdAt };
+
+    const idxEnc = data.senhas.findIndex(x => x.id === id);
+    if (idxEnc >= 0) data.senhas[idxEnc] = encEntry; else data.senhas.push(encEntry);
+
+    const idxDec = decryptedSenhas.findIndex(x => x.id === id);
+    const decEntry = { id, site, user, pass, notas, createdAt };
+    if (idxDec >= 0) decryptedSenhas[idxDec] = decEntry; else decryptedSenhas.push(decEntry);
   }
 
   await saveToCloud();
@@ -928,7 +1291,12 @@ async function saveCurrentItem() {
 window.saveCurrentItem = saveCurrentItem;
 
 async function deleteCurrentItem() {
-  data[activeTab] = data[activeTab].filter(x => x.id !== currentEditId);
+  if (activeTab === "senhas") {
+    data.senhas = data.senhas.filter(x => x.id !== currentEditId);
+    decryptedSenhas = decryptedSenhas.filter(x => x.id !== currentEditId);
+  } else {
+    data[activeTab] = data[activeTab].filter(x => x.id !== currentEditId);
+  }
   await saveToCloud();
   scheduleAllReminders();
   showToast("Excluído");
@@ -995,7 +1363,7 @@ function showToast(msg) {
 
   try {
     await initFirebase();
-    if (firebaseReady) {
+    if (firebaseReady && currentUser) {
       await loadFromCloud();
       renderList();
       scheduleAllReminders();
