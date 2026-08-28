@@ -50,23 +50,8 @@
                var(--paper);
   }
   #lock h1, #cloud-login h1{font-size:46px; background:linear-gradient(90deg,var(--blue),var(--lime)); -webkit-background-clip:text; background-clip:text; color:transparent;}
-  .pin-dots{display:flex; gap:14px; margin:6px 0 10px;}
-  .pin-dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--blue); background:transparent;}
-  .pin-dot.filled{background:var(--blue);}
-  .keypad{display:grid; grid-template-columns:repeat(3,64px); gap:14px;}
-  .key{
-    height:64px; border-radius:50%; border:none; background:#fff;
-    box-shadow:0 3px 0 #e6ddf5;
-    font-family:'Fredoka',sans-serif; font-size:20px; color:var(--ink);
-    display:flex; align-items:center; justify-content:center; cursor:pointer;
-  }
-  .key:active{background:var(--blue); color:#fff; box-shadow:none; transform:translateY(2px);}
-  #lock-msg{font-size:13px; color:var(--coral); min-height:16px; font-weight:600;}
-  #setup-note{font-size:12px; color:var(--ink-soft); max-width:280px; line-height:1.5;}
   #lock-cancel, #cloud-login-cancel{position:absolute; top:16px; left:16px;}
-  #forgot-pin-btn{margin-top:2px;}
-  #recovery-setup, #recovery-answer-wrap{width:100%; max-width:280px;}
-  #recovery-question-display{font-size:13px; color:var(--ink-soft); font-weight:700; line-height:1.4;}
+  #master-pass-setup, #master-pass-check{width:100%; max-width:280px;}
 
   /* ---------- HEADER ---------- */
   header{
@@ -205,37 +190,17 @@
 <body>
 <div id="app">
 
-  <!-- LOCK (protege apenas a aba Senhas) -->
+  <!-- LOCK (protege apenas a aba Senhas, agora só com a senha mestra) -->
   <div id="lock" class="screen" style="display:none;">
     <button class="link-btn" id="lock-cancel" onclick="cancelLock()">‹ Cancelar</button>
     <h1 id="lock-title">Caderno</h1>
-    <div class="pin-dots" id="pin-dots"></div>
-    <div id="lock-msg"></div>
-    <div class="keypad" id="keypad"></div>
-    <div id="setup-note"></div>
 
-    <div id="recovery-setup" style="display:none; flex-direction:column; gap:10px;">
-      <label class="field-label">Pergunta de recuperação</label>
-      <input id="recovery-question-input" type="text" placeholder="Ex: nome do meu primeiro pet">
-      <label class="field-label">Resposta secreta</label>
-      <input id="recovery-answer-input" type="text" placeholder="Resposta">
-      <button class="btn btn-primary" onclick="confirmRecoverySetup()">Continuar</button>
-    </div>
-
-    <div id="recovery-answer-wrap" style="display:none; flex-direction:column; gap:10px;">
-      <div id="recovery-question-display"></div>
-      <input id="recovery-answer-check" type="text" placeholder="Sua resposta">
-      <button class="btn btn-primary" onclick="checkRecoveryAnswer()">Verificar</button>
-    </div>
-
-    <button class="link-btn" id="forgot-pin-btn" onclick="startRecovery()" style="display:none;">Esqueci meu PIN</button>
-
-    <!-- Senha mestra: chave real de criptografia das senhas (separada do PIN) -->
+    <!-- Senha mestra: única chave de acesso e de criptografia das senhas -->
     <div id="master-pass-setup" style="display:none; flex-direction:column; gap:10px;">
       <div style="font-size:12px; color:var(--coral); font-weight:700; line-height:1.5;">
-        ⚠️ Esta senha mestra criptografa suas senhas de verdade. Ela é diferente do PIN
-        e <u>não pode ser recuperada</u> se você esquecer — anote em um lugar seguro,
-        fora do celular.
+        ⚠️ Esta senha mestra criptografa suas senhas de verdade e é a única forma de
+        acessá-las. Ela <u>não pode ser recuperada</u> se você esquecer — anote em um
+        lugar seguro, fora do celular.
       </div>
       <input id="master-pass-input" type="password" placeholder="Crie uma senha mestra (mín. 8 caracteres)" autocomplete="new-password">
       <input id="master-pass-confirm" type="password" placeholder="Repita a senha mestra" autocomplete="new-password">
@@ -243,7 +208,7 @@
     </div>
 
     <div id="master-pass-check" style="display:none; flex-direction:column; gap:10px;">
-      <div style="font-size:12px; color:var(--ink-soft); font-weight:600;">Senha mestra (criptografia)</div>
+      <div style="font-size:12px; color:var(--ink-soft); font-weight:600;">Senha mestra</div>
       <input id="master-pass-check-input" type="password" placeholder="Digite sua senha mestra" autocomplete="current-password">
       <button class="btn btn-primary" onclick="confirmMasterPasswordCheck()">Desbloquear senhas</button>
     </div>
@@ -259,6 +224,7 @@
       <input id="cloud-email" type="email" placeholder="E-mail" autocomplete="username">
       <input id="cloud-password" type="password" placeholder="Senha (mín. 6 caracteres)" autocomplete="current-password">
       <button class="btn btn-primary" id="cloud-login-submit-btn" onclick="submitCloudLogin()">Entrar</button>
+      <button class="link-btn" id="cloud-forgot-btn" onclick="sendCloudPasswordReset()">Esqueci minha senha</button>
       <button class="link-btn" id="cloud-login-toggle-btn" onclick="toggleCloudAuthMode()">Ainda não tenho conta — criar</button>
     </div>
 
@@ -406,7 +372,7 @@ async function initFirebase() {
     const { getFirestore, doc, getDoc, setDoc } = await withTimeout(
       import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"), 10000, "carregar o Firebase (banco)"
     );
-    const { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } =
+    const { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail } =
       await withTimeout(
         import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"), 10000, "carregar o Firebase (login)"
       );
@@ -414,7 +380,7 @@ async function initFirebase() {
     db = getFirestore(app);
     const auth = getAuth(app);
     window.__fb = { doc, getDoc, setDoc };
-    window.__fbAuth = { auth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut };
+    window.__fbAuth = { auth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail };
     firebaseReady = true;
     lastFirebaseError = null;
     setSyncStatus(true);
@@ -498,8 +464,6 @@ const APP_VERSION = "1.1.0";
 
 /* =========================== ESTADO EM MEMÓRIA =========================== */
 let data = {
-  pin: null,
-  recovery: null, // { question, answer }
   rascunhos: [],
   lembretes: [],
   receitas: [],
@@ -507,8 +471,7 @@ let data = {
   senhasSalt: null, // salt (não secreto) usado para derivar a chave da senha mestra
   senhasEncrypted: false
 };
-let pinBuffer = "";
-let mode = "checkPin"; // createPin | checkPin | createRecovery | recoverAnswer | resetPin | createMasterPassword | checkMasterPassword
+let mode = "checkMasterPassword"; // createMasterPassword | checkMasterPassword
 let activeTab = "rascunhos";
 let currentEditId = null;
 let scheduledTimers = {};
@@ -530,8 +493,6 @@ function loadFromLocalStorage() {
     const raw = localStorage.getItem(LOCAL_KEY);
     if (!raw) return;
     const d = JSON.parse(raw);
-    data.pin = d.pin || null;
-    data.recovery = d.recovery || null;
     data.rascunhos = d.rascunhos || [];
     data.lembretes = d.lembretes || [];
     data.receitas = d.receitas || [];
@@ -559,8 +520,6 @@ async function loadFromCloud() {
     const snap = await withTimeout(getDoc(ref), 10000, "carregar os dados da nuvem");
     if (snap.exists()) {
       const d = snap.data();
-      data.pin = d.pin || null;
-      data.recovery = d.recovery || null;
       data.rascunhos = d.rascunhos || [];
       data.lembretes = d.lembretes || [];
       data.receitas = d.receitas || [];
@@ -769,6 +728,7 @@ function renderCloudLogin() {
     document.getElementById('cloud-login-toggle-btn').textContent = cloudAuthMode === "signup"
       ? "Já tenho conta — entrar"
       : "Ainda não tenho conta — criar";
+    document.getElementById('cloud-forgot-btn').style.display = cloudAuthMode === "signup" ? "none" : "block";
   }
 }
 
@@ -830,115 +790,48 @@ async function signOutCloud() {
 }
 window.signOutCloud = signOutCloud;
 
-/* =========================== TELA DE PIN (protege apenas "Senhas") =========================== */
-const PIN_MODES = ["createPin", "checkPin", "resetPin"];
+/* Envia um e-mail de redefinição de senha (fluxo padrão do Firebase Auth) para
+   o e-mail digitado no campo de login. */
+async function sendCloudPasswordReset() {
+  const email = document.getElementById('cloud-email').value.trim();
+  if (!email) { showToast("Digite seu e-mail no campo acima primeiro"); return; }
+  if (!firebaseReady) {
+    try { await initFirebase(); } catch (e) { /* tenta abaixo mesmo assim */ }
+  }
+  if (!firebaseReady || !window.__fbAuth) { showToast("Sem conexão com o Firebase agora"); return; }
+  try {
+    await withTimeout(
+      window.__fbAuth.sendPasswordResetEmail(window.__fbAuth.auth, email),
+      10000, "enviar e-mail de recuperação"
+    );
+    showToast("📧 E-mail de recuperação enviado — confira sua caixa de entrada");
+  } catch (e) {
+    console.warn("Falha ao enviar recuperação:", e);
+    showToast("⚠️ " + describeFirebaseError(e));
+  }
+}
+window.sendCloudPasswordReset = sendCloudPasswordReset;
 
+/* =========================== TELA DE ACESSO A "SENHAS" (só senha mestra) =========================== */
 function renderLock() {
-  const showKeypad = PIN_MODES.includes(mode);
-  document.getElementById('keypad').style.display = showKeypad ? 'grid' : 'none';
-  document.getElementById('pin-dots').style.display = showKeypad ? 'flex' : 'none';
-  document.getElementById('recovery-setup').style.display = mode === 'createRecovery' ? 'flex' : 'none';
-  document.getElementById('recovery-answer-wrap').style.display = mode === 'recoverAnswer' ? 'flex' : 'none';
-  document.getElementById('forgot-pin-btn').style.display = (mode === 'checkPin' && data.recovery) ? 'block' : 'none';
   document.getElementById('master-pass-setup').style.display = mode === 'createMasterPassword' ? 'flex' : 'none';
   document.getElementById('master-pass-check').style.display = mode === 'checkMasterPassword' ? 'flex' : 'none';
 
   const titles = {
-    createPin: "Crie um PIN",
-    checkPin: "Senhas 🔒",
-    createRecovery: "Recuperação",
-    recoverAnswer: "Recuperar PIN",
-    resetPin: "Novo PIN",
     createMasterPassword: "Proteger senhas",
-    checkMasterPassword: "Senhas 🔒🔑"
+    checkMasterPassword: "Senhas 🔒"
   };
   document.getElementById('lock-title').textContent = titles[mode] || "Caderno";
-
-  const notes = {
-    createPin: "Defina um PIN de 4 dígitos para proteger a aba Senhas.",
-    checkPin: "",
-    createRecovery: "Configure uma pergunta para recuperar seu PIN caso esqueça.",
-    recoverAnswer: "",
-    resetPin: "Digite um novo PIN de 4 dígitos.",
-    createMasterPassword: "",
-    checkMasterPassword: ""
-  };
-  document.getElementById('setup-note').textContent = notes[mode] || "";
-  document.getElementById('lock-msg').textContent = "";
-
-  if (showKeypad) { buildKeypad(); renderPinDots(); }
 }
 
-function buildKeypad() {
-  const el = document.getElementById('keypad');
-  el.innerHTML = "";
-  const keys = ["1","2","3","4","5","6","7","8","9","","0","⌫"];
-  keys.forEach(k => {
-    const b = document.createElement('button');
-    b.className = 'key';
-    b.textContent = k;
-    if (k === "") b.style.visibility = "hidden";
-    b.onclick = () => handleKey(k);
-    el.appendChild(b);
-  });
-}
-
-function renderPinDots() {
-  const el = document.getElementById('pin-dots');
-  el.innerHTML = "";
-  for (let i = 0; i < 4; i++) {
-    const d = document.createElement('div');
-    d.className = 'pin-dot' + (i < pinBuffer.length ? ' filled' : '');
-    el.appendChild(d);
-  }
-}
-
-function handleKey(k) {
-  const msg = document.getElementById('lock-msg');
-  msg.textContent = "";
-  if (k === "⌫") { pinBuffer = pinBuffer.slice(0, -1); renderPinDots(); return; }
-  if (k === "" || pinBuffer.length >= 4) return;
-  pinBuffer += k;
-  renderPinDots();
-  if (pinBuffer.length === 4) {
-    if (mode === "createPin") {
-      // Guarda o PIN temporariamente; a etapa seguinte define a recuperação.
-      data.pinPending = pinBuffer;
-      pinBuffer = "";
-      mode = "createRecovery";
-      renderLock();
-    } else if (mode === "resetPin") {
-      data.pin = pinBuffer;
-      pinBuffer = "";
-      saveToCloud();
-      goToMasterPasswordStep();
-    } else {
-      if (pinBuffer === data.pin) {
-        pinBuffer = "";
-        goToMasterPasswordStep();
-      } else {
-        msg.textContent = "PIN incorreto";
-        setTimeout(() => { pinBuffer = ""; renderPinDots(); }, 350);
-      }
-    }
-  }
-}
-
-/* Abre a tela de PIN somente quando o usuário tenta acessar "Senhas" */
+/* Abre a tela da senha mestra ao tentar acessar "Senhas" */
 function openSenhasLock() {
-  pinBuffer = "";
-  mode = data.pin ? "checkPin" : "createPin";
   document.getElementById('main').style.display = 'none';
   document.getElementById('lock').style.display = 'flex';
-  renderLock();
+  goToMasterPasswordStep();
 }
 
 function cancelLock() {
-  pinBuffer = "";
-  delete data.pinPending;
-  document.getElementById('recovery-question-input').value = "";
-  document.getElementById('recovery-answer-input').value = "";
-  document.getElementById('recovery-answer-check').value = "";
   document.getElementById('master-pass-input').value = "";
   document.getElementById('master-pass-confirm').value = "";
   document.getElementById('master-pass-check-input').value = "";
@@ -947,45 +840,7 @@ function cancelLock() {
 }
 window.cancelLock = cancelLock;
 
-function confirmRecoverySetup() {
-  const q = document.getElementById('recovery-question-input').value.trim();
-  const a = document.getElementById('recovery-answer-input').value.trim();
-  if (!q || !a) { showToast("Preencha a pergunta e a resposta"); return; }
-  data.pin = data.pinPending;
-  delete data.pinPending;
-  data.recovery = { question: q, answer: a.toLowerCase() };
-  document.getElementById('recovery-question-input').value = "";
-  document.getElementById('recovery-answer-input').value = "";
-  saveToCloud();
-  goToMasterPasswordStep();
-}
-window.confirmRecoverySetup = confirmRecoverySetup;
-
-function startRecovery() {
-  if (!data.recovery) { showToast("Nenhuma recuperação configurada"); return; }
-  mode = "recoverAnswer";
-  document.getElementById('recovery-question-display').textContent = data.recovery.question;
-  renderLock();
-}
-window.startRecovery = startRecovery;
-
-function checkRecoveryAnswer() {
-  const val = document.getElementById('recovery-answer-check').value.trim().toLowerCase();
-  document.getElementById('recovery-answer-check').value = "";
-  if (data.recovery && val && val === data.recovery.answer) {
-    mode = "resetPin";
-    pinBuffer = "";
-    renderLock();
-    showToast("Resposta correta! Crie um novo PIN.");
-  } else {
-    showToast("Resposta incorreta");
-  }
-}
-window.checkRecoveryAnswer = checkRecoveryAnswer;
-
-/* Depois do PIN, exige a senha mestra (chave real de criptografia) antes de
-   liberar a aba Senhas. Se ainda não existe (data.senhasSalt vazio), pede
-   para criar; senão, pede para digitar. */
+/* Se ainda não existe senha mestra (data.senhasSalt vazio), pede para criar; senão, pede para digitar. */
 function goToMasterPasswordStep() {
   mode = data.senhasSalt ? "checkMasterPassword" : "createMasterPassword";
   renderLock();
