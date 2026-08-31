@@ -169,7 +169,7 @@
   #editor-title-input{font-family:'Fredoka',sans-serif; font-size:20px; font-weight:600;}
   textarea{min-height:140px; resize:vertical; line-height:1.6;}
   .field-grow{flex:1 1 auto; min-height:200px;}
-  #fields-rascunhos, #fields-lembretes, #fields-receitas{flex:1;}
+  #fields-rascunhos, #fields-lembretes, #fields-receitas, #fields-senhas{flex:1;}
   .pw-row{display:flex; align-items:center; gap:8px;}
   .pw-row input{flex:1;}
   .save-bar{margin-top:auto; padding-top:12px;}
@@ -304,7 +304,7 @@
         <input id="senha-pass" type="password" placeholder="Senha">
         <button class="link-btn" onclick="togglePassVisibility()">mostrar</button>
       </div>
-      <textarea id="senha-notas" placeholder="Notas (opcional)" style="min-height:70px;"></textarea>
+      <textarea id="senha-notas" class="field-grow" placeholder="Notas (opcional)" style="min-height:150px;"></textarea>
     </div>
 
     <div class="save-bar">
@@ -459,8 +459,20 @@ function setSyncStatus(on) {
             recuperação de PIN por pergunta secreta; campos de texto dos
             editores (rascunho, lembrete, receita) aumentados para ocupar
             a tela; configuração real do Firebase conectada.
+   v1.2.0 — app passou a abrir e funcionar offline (armazenamento local),
+            sincronizando com a nuvem em segundo plano; botão manual de
+            "Salvar na nuvem"; data/hora do último salvamento exibida;
+            diagnóstico de erros de conexão com tempo limite (timeout).
+   v1.3.0 — senhas passaram a ser criptografadas de verdade (AES-256-GCM)
+            com uma senha mestra que nunca sai do aparelho; identificador
+            do documento no Firestore tornado único e imprevisível.
+   v1.4.0 — adicionado login por e-mail/senha (Firebase Authentication)
+            protegendo todo o banco de dados na nuvem, com recuperação de
+            senha por e-mail; PIN removido do acesso à aba "Senhas" — o
+            acesso passou a depender só da senha mestra.
+   v1.5.0 — campo de notas da aba "Senhas" aumentado para ocupar a tela.
    ========================================================================= */
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.5.0";
 
 /* =========================== ESTADO EM MEMÓRIA =========================== */
 let data = {
