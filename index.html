@@ -90,15 +90,30 @@
   #list{flex:1; overflow-y:auto; padding:12px 18px 100px;}
   .empty{color:var(--ink-soft); font-size:14px; margin-top:40px; line-height:1.6; text-align:center;}
   .empty .big{font-size:38px; display:block; margin-bottom:8px;}
+  .card-wrap{position:relative; margin-bottom:12px;}
+  .swipe-actions{
+    position:absolute; left:0; top:0; bottom:0; width:148px;
+    display:flex; border-radius:16px; overflow:hidden;
+  }
+  .swipe-btn{
+    flex:1; border:none; color:#fff; cursor:pointer;
+    font-family:'Fredoka',sans-serif; font-weight:600; font-size:13px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .swipe-btn.swipe-cancel{background:var(--ink-soft);}
+  .swipe-btn.swipe-delete{background:var(--coral);}
   .card{
+    position:relative; z-index:1;
     background:#fff;
     border-radius:16px;
     padding:14px 16px;
-    margin-bottom:12px;
+    margin-bottom:0;
     cursor:pointer;
     box-shadow:0 3px 10px rgba(43,42,74,.07);
     border-left:5px solid var(--ink-soft);
     display:flex; gap:12px; align-items:flex-start;
+    touch-action:pan-y;
+    user-select:none;
   }
   .card .badge{
     width:34px;height:34px;border-radius:10px; flex:none;
@@ -185,6 +200,22 @@
     font-size:12px; font-weight:600; z-index:6; opacity:0; transition:opacity .25s; pointer-events:none;
   }
   .toast.show{opacity:1;}
+
+  /* ---------- CONFIRMAÇÃO (excluir) ---------- */
+  .confirm-overlay{
+    position:absolute; inset:0; z-index:20;
+    background:rgba(43,42,74,.45);
+    display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .confirm-card{
+    width:100%; max-width:320px; background:#fff; border-radius:18px;
+    padding:22px 20px; box-shadow:0 12px 30px rgba(0,0,0,.25);
+  }
+  .confirm-title{font-family:'Fredoka',sans-serif; font-size:18px; font-weight:600; color:var(--ink); margin-bottom:6px;}
+  .confirm-msg{font-size:13px; color:var(--ink-soft); line-height:1.5; margin-bottom:18px;}
+  .confirm-btns{display:flex; gap:10px;}
+  .confirm-btns .btn{width:auto; flex:1; padding:12px;}
+  .confirm-danger{background:linear-gradient(120deg,var(--coral),#ff9472); box-shadow:0 5px 14px rgba(255,107,107,.4);}
 </style>
 </head>
 <body>
@@ -313,6 +344,17 @@
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <div id="confirm-overlay" class="confirm-overlay" style="display:none;">
+    <div class="confirm-card">
+      <div class="confirm-title" id="confirm-title">Excluir?</div>
+      <div class="confirm-msg" id="confirm-msg">Essa ação não pode ser desfeita.</div>
+      <div class="confirm-btns">
+        <button class="btn btn-secondary" id="confirm-cancel-btn" type="button">Cancelar</button>
+        <button class="btn btn-primary confirm-danger" id="confirm-ok-btn" type="button">Excluir</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script type="module">
@@ -472,7 +514,7 @@ function setSyncStatus(on) {
             acesso passou a depender só da senha mestra.
    v1.5.0 — campo de notas da aba "Senhas" aumentado para ocupar a tela.
    ========================================================================= */
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.6.0";
 
 /* =========================== ESTADO EM MEMÓRIA =========================== */
 let data = {
@@ -1007,9 +1049,18 @@ function renderList() {
   const badgeIcon = { rascunhos: "📝", lembretes: "🔔", receitas: "🍲", senhas: "🔑" }[activeTab];
 
   items.forEach(item => {
+    const wrap = document.createElement('div');
+    wrap.className = 'card-wrap';
+    wrap.dataset.id = item.id;
+
+    const actions = document.createElement('div');
+    actions.className = 'swipe-actions';
+    actions.innerHTML = `
+      <button class="swipe-btn swipe-cancel" type="button">Cancelar</button>
+      <button class="swipe-btn swipe-delete" type="button">Excluir</button>`;
+
     const div = document.createElement('div');
     div.className = 'card ' + typeClass;
-    div.onclick = () => openEditor(item.id);
 
     let bodyHtml = "", metaHtml = "";
     if (activeTab === "rascunhos") {
@@ -1031,8 +1082,85 @@ function renderList() {
         ${bodyHtml}
         ${metaHtml}
       </div>`;
-    el.appendChild(div);
+
+    wrap.appendChild(actions);
+    wrap.appendChild(div);
+    el.appendChild(wrap);
+
+    actions.querySelector('.swipe-cancel').addEventListener('click', () => closeAllSwipes());
+    actions.querySelector('.swipe-delete').addEventListener('click', () => {
+      closeAllSwipes();
+      showConfirm(
+        "Excluir item?",
+        "\u201c" + (titleOf(item) || "Sem título") + "\u201d será apagado. Essa ação não pode ser desfeita.",
+        async () => { await deleteItemById(activeTab, item.id); renderList(); }
+      );
+    });
+
+    attachSwipe(wrap, div, item.id);
   });
+}
+
+/* =========================== SWIPE PARA EXCLUIR (arrastar card p/ direita) =========================== */
+const SWIPE_REVEAL = 148; // px revelados quando o card é arrastado totalmente
+let swipeOpenId = null;
+
+function closeAllSwipes() {
+  document.querySelectorAll('.card-wrap .card').forEach(c => {
+    c.style.transition = 'transform .18s ease';
+    c.style.transform = 'translateX(0px)';
+  });
+  swipeOpenId = null;
+}
+window.closeAllSwipes = closeAllSwipes;
+
+function attachSwipe(wrap, card, id) {
+  let startX = 0, startY = 0, dx = 0, axis = null, active = false, baseX = 0;
+
+  card.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    active = true; axis = null; dx = 0;
+    startX = e.clientX; startY = e.clientY;
+    baseX = (swipeOpenId === id) ? SWIPE_REVEAL : 0;
+    card.style.transition = 'none';
+    try { card.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+
+  card.addEventListener('pointermove', (e) => {
+    if (!active) return;
+    const mx = e.clientX - startX, my = e.clientY - startY;
+    if (axis === null) {
+      if (Math.abs(mx) < 6 && Math.abs(my) < 6) return;
+      axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+      if (axis === 'x' && swipeOpenId && swipeOpenId !== id) closeAllSwipes();
+    }
+    if (axis === 'x') {
+      if (e.cancelable) e.preventDefault();
+      dx = Math.max(0, Math.min(SWIPE_REVEAL, baseX + mx));
+      card.style.transform = `translateX(${dx}px)`;
+    }
+  });
+
+  function finish() {
+    if (!active) return;
+    active = false;
+    card.style.transition = 'transform .18s ease';
+    if (axis === 'x') {
+      if (dx > SWIPE_REVEAL / 2) {
+        card.style.transform = `translateX(${SWIPE_REVEAL}px)`;
+        swipeOpenId = id;
+      } else {
+        card.style.transform = 'translateX(0px)';
+        if (swipeOpenId === id) swipeOpenId = null;
+      }
+    } else if (axis === null) {
+      // foi um toque (tap), sem arrasto: abre o item, ou só fecha o swipe aberto
+      if (swipeOpenId) closeAllSwipes();
+      else openEditor(id);
+    }
+  }
+  card.addEventListener('pointerup', finish);
+  card.addEventListener('pointercancel', finish);
 }
 
 function escapeHtml(s){ return (s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
@@ -1157,19 +1285,52 @@ async function saveCurrentItem() {
 }
 window.saveCurrentItem = saveCurrentItem;
 
-async function deleteCurrentItem() {
-  if (activeTab === "senhas") {
-    data.senhas = data.senhas.filter(x => x.id !== currentEditId);
-    decryptedSenhas = decryptedSenhas.filter(x => x.id !== currentEditId);
+/* Exclusão de fato, usada tanto pelo editor quanto pelo swipe na lista. */
+async function deleteItemById(tab, id) {
+  if (tab === "senhas") {
+    data.senhas = data.senhas.filter(x => x.id !== id);
+    decryptedSenhas = decryptedSenhas.filter(x => x.id !== id);
   } else {
-    data[activeTab] = data[activeTab].filter(x => x.id !== currentEditId);
+    data[tab] = data[tab].filter(x => x.id !== id);
   }
   await saveToCloud();
   scheduleAllReminders();
   showToast("Excluído");
-  closeEditor();
+}
+window.deleteItemById = deleteItemById;
+
+function deleteCurrentItem() {
+  const item = getActiveList().find(x => x.id === currentEditId);
+  showConfirm(
+    "Excluir item?",
+    "\u201c" + (item ? (titleOf(item) || "Sem título") : "Este item") + "\u201d será apagado. Essa ação não pode ser desfeita.",
+    async () => { await deleteItemById(activeTab, currentEditId); closeEditor(); }
+  );
 }
 window.deleteCurrentItem = deleteCurrentItem;
+
+/* =========================== CONFIRMAÇÃO GENÉRICA =========================== */
+function showConfirm(title, message, onConfirm) {
+  const overlay = document.getElementById('confirm-overlay');
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-msg').textContent = message;
+  overlay.style.display = 'flex';
+
+  const okBtn = document.getElementById('confirm-ok-btn');
+  const cancelBtn = document.getElementById('confirm-cancel-btn');
+
+  function cleanup() {
+    overlay.style.display = 'none';
+    okBtn.removeEventListener('click', onOk);
+    cancelBtn.removeEventListener('click', onCancel);
+  }
+  function onOk() { cleanup(); onConfirm && onConfirm(); }
+  function onCancel() { cleanup(); }
+
+  okBtn.addEventListener('click', onOk);
+  cancelBtn.addEventListener('click', onCancel);
+}
+window.showConfirm = showConfirm;
 
 /* =========================== LEMBRETES / NOTIFICAÇÕES ===========================
    Notificações "push" reais (com o app fechado) exigem Service Worker +
