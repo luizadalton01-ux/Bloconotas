@@ -133,13 +133,17 @@
   .card.aniversario .badge{background:var(--bday-bg); color:var(--bday);}
   .age-highlight{
     flex:none; display:flex; flex-direction:column; align-items:center; justify-content:center;
-    min-width:50px; padding:2px 6px; border-radius:12px; background:var(--bday-bg);
+    min-width:50px; padding:2px 6px; border-radius:12px; background:linear-gradient(120deg,#DCEEFB,#DFF6F4);
   }
   .age-highlight .age-number{
-    font-family:'Fredoka',sans-serif; font-weight:700; font-size:26px; color:var(--bday); line-height:1;
+    font-family:'Fredoka',sans-serif; font-weight:700; font-size:26px; line-height:1;
+    background:linear-gradient(120deg,#2C9CDB,#4FD6A8);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
   }
   .age-highlight .age-label{
-    font-size:10px; color:var(--bday); font-weight:700; text-transform:uppercase; letter-spacing:.02em;
+    font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.02em;
+    background:linear-gradient(120deg,#2C9CDB,#4FD6A8);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
   }
   .card.disabled{opacity:.55;}
   .card-meta.disabled-label{color:var(--ink-soft); font-style:italic;}
@@ -364,7 +368,7 @@
     <div id="fields-aniversarios" style="display:none; flex-direction:column; gap:12px;">
       <input id="aniversario-title" type="text" placeholder="Nome (ex.: Aniversário da Maria)">
       <label class="field-label">Data de nascimento</label>
-      <input id="aniversario-birthdate" type="date">
+      <input id="aniversario-birthdate" type="text" inputmode="numeric" placeholder="DD/MM/AAAA" maxlength="10" oninput="formatBirthDateInput(event)">
       <textarea id="aniversario-body" class="field-grow" placeholder="Detalhes (opcional)" style="min-height:100px;"></textarea>
       <label class="field-label">Data e hora do lembrete</label>
       <input id="aniversario-when" type="datetime-local">
@@ -1251,8 +1255,39 @@ function toDatetimeLocalValue(d) {
   return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
+/* Enquanto o usuário digita no campo de data de nascimento (texto livre), insere as
+   barras automaticamente: aceita só dígitos e formata como DD/MM/AAAA. */
+function formatBirthDateInput(e) {
+  let v = e.target.value.replace(/\D/g, "").slice(0, 8);
+  if (v.length >= 5) v = v.slice(0, 2) + "/" + v.slice(2, 4) + "/" + v.slice(4);
+  else if (v.length >= 3) v = v.slice(0, 2) + "/" + v.slice(2);
+  e.target.value = v;
+}
+window.formatBirthDateInput = formatBirthDateInput;
+
+/* Converte "DD/MM/AAAA" (o que o usuário digita) para "AAAA-MM-DD" (o que fica salvo
+   e o que calcAge espera). Retorna null se a data for inválida (ex.: 31/02). */
+function parseBirthDateBR(str) {
+  const m = String(str || "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  const d = parseInt(m[1], 10), mo = parseInt(m[2], 10), y = parseInt(m[3], 10);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || y < 1900 || y > 2100) return null;
+  const date = new Date(y, mo - 1, d);
+  if (date.getFullYear() !== y || date.getMonth() !== mo - 1 || date.getDate() !== d) return null;
+  const pad = n => String(n).padStart(2, '0');
+  return y + '-' + pad(mo) + '-' + pad(d);
+}
+
+/* Converte "AAAA-MM-DD" (salvo) para "DD/MM/AAAA" (exibido no campo de texto). */
+function formatBirthDateBR(iso) {
+  if (!iso) return "";
+  const [y, mo, d] = iso.split('-');
+  if (!y || !mo || !d) return "";
+  return d + "/" + mo + "/" + y;
+}
+
 /* Calcula a idade completa (em anos) a partir de uma data de nascimento no formato
-   "AAAA-MM-DD" (valor bruto do <input type="date">). Retorna null se não houver data. */
+   "AAAA-MM-DD" (valor salvo internamente). Retorna null se não houver data. */
 function calcAge(birthDateStr) {
   if (!birthDateStr) return null;
   const b = new Date(birthDateStr + "T00:00:00");
@@ -1286,7 +1321,7 @@ function openEditor(id) {
     document.getElementById('lembrete-enabled').checked = item ? (item.enabled !== false) : true;
   } else if (activeTab === "aniversarios") {
     document.getElementById('aniversario-title').value = item ? item.title : "";
-    document.getElementById('aniversario-birthdate').value = item && item.birthDate ? item.birthDate : "";
+    document.getElementById('aniversario-birthdate').value = item && item.birthDate ? formatBirthDateBR(item.birthDate) : "";
     document.getElementById('aniversario-body').value = item ? item.body : "";
     document.getElementById('aniversario-when').value = item && item.whenISO ? toDatetimeLocalValue(new Date(item.whenISO)) : "";
     document.getElementById('aniversario-repeat').value = item ? (item.repeat || "yearly") : "yearly";
@@ -1351,7 +1386,9 @@ async function saveCurrentItem() {
   } else if (activeTab === "aniversarios") {
     const list = data.aniversarios;
     const title = document.getElementById('aniversario-title').value.trim();
-    const birthDate = document.getElementById('aniversario-birthdate').value || null;
+    const birthDateRaw = document.getElementById('aniversario-birthdate').value.trim();
+    const birthDate = birthDateRaw ? parseBirthDateBR(birthDateRaw) : null;
+    if (birthDateRaw && !birthDate) { showToast("Data de nascimento inválida"); return; }
     const body = document.getElementById('aniversario-body').value;
     const whenVal = document.getElementById('aniversario-when').value;
     const repeat = document.getElementById('aniversario-repeat').value;
@@ -1589,7 +1626,7 @@ function sendScheduleToKodular() {
       const minutesFromNow = Math.round((new Date(n.whenISO).getTime() - now) / 60000);
       if (minutesFromNow < 1) return null; // já passou, não agenda
       const titulo = sanitizeCampoKodular(n.title);
-      const mensagem = sanitizeCampoKodular(n.body);
+      const mensagem = sanitizeCampoKodular(n.body) || " ";
       return idParaNumero(n.id) + "*" + minutesFromNow + "*" + titulo + "*" + mensagem;
     })
     .filter(Boolean);
