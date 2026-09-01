@@ -1229,12 +1229,25 @@ function sanitizeCampoKodular(str) {
   return String(str || "").replace(/[|:;*]/g, " ").trim();
 }
 
+function idParaNumero(str) {
+  // O AlarmExtension1 usa o "id" como requestCode do alarme no Android, que precisa ser um
+  // NÚMERO inteiro — por isso o CancelAlarm rejeitava o UUID (texto) do lembrete. Esta função
+  // transforma o UUID sempre no mesmo número inteiro (hash estável), então cancelar e reagendar
+  // continuam batendo com o alarme certo.
+  let hash = 5381;
+  const s = String(str);
+  for (let i = 0; i < s.length; i++) {
+    hash = ((hash * 33) ^ s.charCodeAt(i)) >>> 0;
+  }
+  return hash % 2000000000; // cabe num inteiro positivo de 32 bits
+}
+
 function sendScheduleToKodular() {
   if (typeof window.AppInventor === 'undefined' || !window.AppInventor.setWebViewString) {
     return; // não está rodando dentro do WebViewer do Kodular (ex.: testando no navegador)
   }
 
-  const cancelIds = data.lembretes.map(n => n.id);
+  const cancelIds = data.lembretes.map(n => idParaNumero(n.id));
   const cancelSection = "C:" + (cancelIds.length ? cancelIds.join(";") : "NONE");
 
   const now = Date.now();
@@ -1245,7 +1258,7 @@ function sendScheduleToKodular() {
       if (minutesFromNow < 1) return null; // já passou, não agenda
       const titulo = sanitizeCampoKodular(n.title);
       const mensagem = sanitizeCampoKodular(n.body);
-      return n.id + "*" + minutesFromNow + "*" + titulo + "*" + mensagem;
+      return idParaNumero(n.id) + "*" + minutesFromNow + "*" + titulo + "*" + mensagem;
     })
     .filter(Boolean);
   const scheduleSection = "S:" + (scheduleItems.length ? scheduleItems.join(";") : "NONE");
