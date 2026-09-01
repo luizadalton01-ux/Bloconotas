@@ -1191,7 +1191,68 @@ function scheduleAllReminders() {
     if (delay <= 0 || delay > 2147000000) return;
     scheduledTimers[n.id] = setTimeout(() => fireReminder(n), delay);
   });
+  sendScheduleToKodular();
 }
+
+/* =========================== PONTE COM O KODULAR (notificações reais) ===========================
+   O navegador/WebView fecha o app e mata os setTimeout acima — por isso as notificações não
+   chegavam. Quem agenda notificação de verdade (mesmo com o app fechado) é o AlarmExtension1
+   lá no Kodular. Esta função manda os dados pra ele via AppInventor.setWebViewString, no MESMO
+   formato que os blocos "Web_Viewer1.WebViewStringChange" esperam receber.
+
+   Formato da string enviada:
+
+       C:id1;id2;...|S:id*minutos*titulo*mensagem;id2*minutos2*titulo2*mensagem2
+
+   - 1ª parte (antes do "|"): "C:" + lista de ids a CANCELAR, separados por ";"
+     (ou "C:NONE" se não houver nada pra cancelar)
+   - 2ª parte (depois do "|"): "S:" + lista de lembretes a AGENDAR, separados por ";"
+     (ou "S:NONE" se não houver lembretes futuros). Cada lembrete vem como
+     id*minutosAPartirDeAgora*titulo*mensagem, campos separados por "*".
+
+   IMPORTANTE — confira no Kodular:
+   1) Os blocos "split ... at" precisam usar EXATAMENTE estes caracteres: "|", ":", ";" e "*"
+      (ajuste o texto de cada bloco "at" se estiver diferente).
+   2) Dentro do "for each item in list global scheduleTexto", o bloco
+      AlarmExtension1.ScheduleOnceInMinutes está pegando id/minutesFromNow/title/message de
+      "global partes" — isso está errado (partes é a string inteira recebida, não o item da
+      vez). Troque as 4 referências de "global partes" por "global pecas" nesse bloco:
+        id             -> select list item (global pecas) index 1
+        minutesFromNow -> select list item (global pecas) index 2
+        title          -> select list item (global pecas) index 3
+        message        -> select list item (global pecas) index 4
+      Sem essa troca, o app vai continuar reagendando sempre o mesmo lembrete (os campos do
+      topo da string) em vez de cada lembrete individual da lista.
+=================================================================================================== */
+function sanitizeCampoKodular(str) {
+  // Remove os caracteres usados como delimitadores, pra não quebrar o parser lá no Kodular
+  return String(str || "").replace(/[|:;*]/g, " ").trim();
+}
+
+function sendScheduleToKodular() {
+  if (typeof window.AppInventor === 'undefined' || !window.AppInventor.setWebViewString) {
+    return; // não está rodando dentro do WebViewer do Kodular (ex.: testando no navegador)
+  }
+
+  const cancelIds = data.lembretes.map(n => n.id);
+  const cancelSection = "C:" + (cancelIds.length ? cancelIds.join(";") : "NONE");
+
+  const now = Date.now();
+  const scheduleItems = data.lembretes
+    .filter(n => n.whenISO)
+    .map(n => {
+      const minutesFromNow = Math.round((new Date(n.whenISO).getTime() - now) / 60000);
+      if (minutesFromNow < 1) return null; // já passou, não agenda
+      const titulo = sanitizeCampoKodular(n.title);
+      const mensagem = sanitizeCampoKodular(n.body);
+      return n.id + "*" + minutesFromNow + "*" + titulo + "*" + mensagem;
+    })
+    .filter(Boolean);
+  const scheduleSection = "S:" + (scheduleItems.length ? scheduleItems.join(";") : "NONE");
+
+  window.AppInventor.setWebViewString(cancelSection + "|" + scheduleSection);
+}
+window.sendScheduleToKodular = sendScheduleToKodular;
 
 function fireReminder(item) {
   if ('Notification' in window && Notification.permission === 'granted') {
