@@ -131,6 +131,16 @@
   .card.receita .badge{background:var(--recipe-bg); color:var(--recipe);}
   .card.aniversario{border-left-color:var(--bday);}
   .card.aniversario .badge{background:var(--bday-bg); color:var(--bday);}
+  .age-highlight{
+    flex:none; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    min-width:50px; padding:2px 6px; border-radius:12px; background:var(--bday-bg);
+  }
+  .age-highlight .age-number{
+    font-family:'Fredoka',sans-serif; font-weight:700; font-size:26px; color:var(--bday); line-height:1;
+  }
+  .age-highlight .age-label{
+    font-size:10px; color:var(--bday); font-weight:700; text-transform:uppercase; letter-spacing:.02em;
+  }
   .card.disabled{opacity:.55;}
   .card-meta.disabled-label{color:var(--ink-soft); font-style:italic;}
   .card-content{min-width:0; flex:1;}
@@ -353,6 +363,8 @@
 
     <div id="fields-aniversarios" style="display:none; flex-direction:column; gap:12px;">
       <input id="aniversario-title" type="text" placeholder="Nome (ex.: Aniversário da Maria)">
+      <label class="field-label">Data de nascimento</label>
+      <input id="aniversario-birthdate" type="date">
       <textarea id="aniversario-body" class="field-grow" placeholder="Detalhes (opcional)" style="min-height:100px;"></textarea>
       <label class="field-label">Data e hora do lembrete</label>
       <input id="aniversario-when" type="datetime-local">
@@ -1114,7 +1126,7 @@ function renderList() {
     const div = document.createElement('div');
     div.className = 'card ' + typeClass + (isDisabled ? ' disabled' : '');
 
-    let bodyHtml = "", metaHtml = "";
+    let bodyHtml = "", metaHtml = "", ageHtml = "";
     if (activeTab === "rascunhos") {
       bodyHtml = `<div class="card-body">${escapeHtml((item.body||"").slice(0,90))}</div>`;
     } else if (activeTab === "lembretes" || activeTab === "aniversarios") {
@@ -1123,6 +1135,12 @@ function renderList() {
       metaHtml = isDisabled
         ? `<div class="card-meta ${typeClass} disabled-label">🔕 Desativado</div>`
         : `<div class="card-meta ${typeClass}">${badgeIcon} ${formatDate(item.whenISO)}${repeatLabel}</div>`;
+      if (activeTab === "aniversarios") {
+        const age = calcAge(item.birthDate);
+        if (age !== null) {
+          ageHtml = `<div class="age-highlight"><span class="age-number">${age}</span><span class="age-label">anos</span></div>`;
+        }
+      }
     } else if (activeTab === "receitas") {
       bodyHtml = `<div class="card-body">${escapeHtml((item.ingredientes||"").slice(0,90))}</div>`;
     } else {
@@ -1136,7 +1154,8 @@ function renderList() {
         <div class="card-title">${escapeHtml(titleOf(item) || "Sem título")}</div>
         ${bodyHtml}
         ${metaHtml}
-      </div>`;
+      </div>
+      ${ageHtml}`;
 
     wrap.appendChild(actions);
     wrap.appendChild(div);
@@ -1232,6 +1251,20 @@ function toDatetimeLocalValue(d) {
   return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
+/* Calcula a idade completa (em anos) a partir de uma data de nascimento no formato
+   "AAAA-MM-DD" (valor bruto do <input type="date">). Retorna null se não houver data. */
+function calcAge(birthDateStr) {
+  if (!birthDateStr) return null;
+  const b = new Date(birthDateStr + "T00:00:00");
+  if (isNaN(b.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - b.getFullYear();
+  const beforeBirthdayThisYear = (now.getMonth() < b.getMonth()) ||
+    (now.getMonth() === b.getMonth() && now.getDate() < b.getDate());
+  if (beforeBirthdayThisYear) age--;
+  return age >= 0 ? age : null;
+}
+
 /* =========================== EDITOR =========================== */
 function openEditor(id) {
   currentEditId = id;
@@ -1253,6 +1286,7 @@ function openEditor(id) {
     document.getElementById('lembrete-enabled').checked = item ? (item.enabled !== false) : true;
   } else if (activeTab === "aniversarios") {
     document.getElementById('aniversario-title').value = item ? item.title : "";
+    document.getElementById('aniversario-birthdate').value = item && item.birthDate ? item.birthDate : "";
     document.getElementById('aniversario-body').value = item ? item.body : "";
     document.getElementById('aniversario-when').value = item && item.whenISO ? toDatetimeLocalValue(new Date(item.whenISO)) : "";
     document.getElementById('aniversario-repeat').value = item ? (item.repeat || "yearly") : "yearly";
@@ -1317,6 +1351,7 @@ async function saveCurrentItem() {
   } else if (activeTab === "aniversarios") {
     const list = data.aniversarios;
     const title = document.getElementById('aniversario-title').value.trim();
+    const birthDate = document.getElementById('aniversario-birthdate').value || null;
     const body = document.getElementById('aniversario-body').value;
     const whenVal = document.getElementById('aniversario-when').value;
     const repeat = document.getElementById('aniversario-repeat').value;
@@ -1325,9 +1360,9 @@ async function saveCurrentItem() {
     const whenISO = new Date(whenVal).toISOString();
     if (currentEditId) {
       const it = list.find(x => x.id === currentEditId);
-      it.title = title; it.body = body; it.whenISO = whenISO; it.repeat = repeat; it.enabled = enabled;
+      it.title = title; it.birthDate = birthDate; it.body = body; it.whenISO = whenISO; it.repeat = repeat; it.enabled = enabled;
     } else {
-      list.push({ id: crypto.randomUUID(), title, body, whenISO, repeat, enabled, createdAt: Date.now() });
+      list.push({ id: crypto.randomUUID(), title, birthDate, body, whenISO, repeat, enabled, createdAt: Date.now() });
     }
   } else if (activeTab === "receitas") {
     const list = data.receitas;
